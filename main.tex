@@ -1,0 +1,122 @@
+\documentclass{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage{blindtext}
+\usepackage{hyperref}
+\usepackage[newfloat]{minted}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{microtype}
+\usepackage[a4paper, margin=1in]{geometry}
+\usepackage{fancyvrb, newverbs, xcolor}
+\usepackage{caption}
+\usepackage[english]{babel}
+
+\definecolor{cverbbg}{gray}{0.93}
+\newcommand{\vtilde}{$\sim\ $}
+
+\newenvironment{code}{\vspace{0mm}\captionsetup{type=listing}}{\vspace{2mm}}
+\SetupFloatingEnvironment{listing}{name=Code Snippet}
+
+\newcommand{\spipe}{\quad\lvert\quad}
+\newcommand{\ctexttt}[1]{\colorbox{cverbbg}{\texttt{#1}}}
+\newverbcommand{\cverb}
+  {\setbox\verbbox\hbox\bgroup}
+  {\egroup\colorbox{cverbbg}{\box\verbbox}}
+
+\hypersetup{
+    colorlinks = true,
+    urlcolor = blue,
+    linkcolor = blue,
+    citecolor = red
+}
+
+\newcommand\MyBox[1]{
+  \fbox{\lower0.75cm
+    \vbox to 1.7cm{\vfil
+      \hbox to 1.7cm{\hfil\parbox{1.4cm}{#1}\hfil}
+      \vfil}%
+  }%
+}
+
+\begin{document}
+
+%Start of titlepage!
+\begin{titlepage}
+    \centering
+    
+    \textls{\textsc{\huge{Utrecht University}}}\\
+    \vspace{5em}
+    \textsc{\Large{Thesis Report}}\\
+    \vspace{2em}
+    \textsc{\large{Department of Information and Computing Sciences}}\\
+    
+    \vspace{3em}
+    \hrulefill
+    \vspace{4em}
+    
+    \huge{Doing some great research}\\
+    \vspace{1em}
+    \Large{Studies that break common knowledge!!!}
+
+    \vspace{4em}
+    \hrulefill
+    \vspace{3em}
+   
+    \begin{tabular}{p{0.5\textwidth}r}
+        \textit{Author:} & \textit{Supervisors:}\\
+        Y. Boi, BSc & prof. dr. T. Supervisor\\
+        y.boi@uu.nl & dr. S. Econd\\
+        1234567 &
+    \end{tabular}
+    
+    \vspace{3em}
+    \textsc{July 2022}\\
+    % \textsc{\textcolor{red}{Version: Draft 2}}
+    
+    \begin{figure}[b]
+        \hspace{-1.25cm}
+        \includegraphics{figs/UU_logo_2021_NL_RGB.png}
+    \end{figure}
+    
+\end{titlepage}
+
+\vspace*{\fill}
+\begin{center}
+\begin{minipage}{.7\textwidth}
+\centerline{\textbf{Abstract}}
+Some abstract can be written here
+\end{minipage}
+\end{center}
+\vfill % equivalent to \vspace{\fill}
+
+\thispagestyle{empty}
+
+\newpage
+\clearpage
+\pagenumbering{roman}
+\tableofcontents
+
+\newpage
+\clearpage
+\pagenumbering{arabic}
+
+%Add with newpage
+\input{chapters/Example.tex}
+
+\newpage
+
+\bibliographystyle{abbrv}
+\bibliography{refs}
+
+
+\appendix
+\clearpage
+\pagenumbering{roman}
+\chapter{Appendix}
+An appendix here!
+
+\end{document}
