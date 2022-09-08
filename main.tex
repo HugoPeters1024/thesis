@@ -58,9 +58,9 @@
     \hrulefill
     \vspace{4em}
     
-    \huge{Doing some great research}\\
+    \huge{Embracing Core \& Supervising the Optimisation Pipeline}\\
     \vspace{1em}
-    \Large{Studies that break common knowledge!!!}
+    \Large{Empowering Haskell developers with a looking glass into the core2core pipeline}
 
     \vspace{4em}
     \hrulefill
@@ -68,13 +68,13 @@
    
     \begin{tabular}{p{0.5\textwidth}r}
         \textit{Author:} & \textit{Supervisors:}\\
-        Y. Boi, BSc & prof. dr. T. Supervisor\\
-        y.boi@uu.nl & dr. S. Econd\\
-        1234567 &
+        H.A. Peters, BSc & W. Swierstra\\
+        h.a.peters@uu.nl & T. McDonall\\
+        5917727 &
     \end{tabular}
     
     \vspace{3em}
-    \textsc{July 2022}\\
+    \textsc{December 2022}\\
     % \textsc{\textcolor{red}{Version: Draft 2}}
     
     \begin{figure}[b]
@@ -105,9 +105,88 @@ Some abstract can be written here
 \pagenumbering{arabic}
 
 %Add with newpage
-\input{chapters/Example.tex}
-
+\input{chapters/Abstract.tex}
 \newpage
+
+\chapter{Introduction}
+\section{The Haskell programming language}
+Haskell is a language explicit about side effects which allows for pretty drastic semantic preserving transformations
+\section{Glasgow Haskell Compiler \& Optimisations}
+GHC uses an IL to define optimisation transformations whose success is greatly determined by the order of optimisations as
+well as user provided information (pragmas and rewrite rules)
+\section{Non-functional testing}
+Testing the shape of the compilation artifacts can be important for performant code (hint: text lib)
+
+\chapter{Background}
+\section{GHC Core}
+Simple AST
+\section{Perfect optimisation is intractable}
+More about the bullets in the gun and how the order matters and finding a fixpoint is hard (intractable?). Rewrite rules
+can be a garguantuan difference in success/failure 
+
+\chapter{Contemporary Haskell comprehension}
+The current capabilities to inspect core as well as analogies from the industry that show the need for something better
+
+\section{Current tooling}
+\subsection{Plain GHC telemetry}
+GHC flags etc.
+\subsection{GHC Plugins}
+Existing snapshot plugins. Good start (Ben's is even version agnostic), but does not provide an amazing user experience.
+
+\section{A case for better tooling}
+\subsection{Fusion in DPH}
+\subsection{GHC maintainers}
+\subsection{Channable \& Text}
+\subsection{Compiler formalisation research}
+\subsection{Normalizing core inspection}
+
+\chapter{Research Questions}
+
+How can GHC’s core2core passes be captured and presented in such a way that core
+inspection becomes a more successful, and easier task?
+
+How does one quickly detect and present where small changes occur in two or more captures?
+  (something about toplevel alpha renaming hashing)
+
+How to make viewing core more manageable using various display options?
+
+How could performance regressions that have occurred in the past in popular Haskell projects,
+have been resolved faster (using HsComprehension)?
+
+\chapter{Methods}
+
+\section{Gathering all available information}
+All about the what GHC encodes in core (IdInfo etc.)
+
+\section{Capturing and saving the information}
+\subsection{Globally unique variables}
+
+\section{Frontend application}
+All about ELM, JSON, and why it may be suboptimal
+
+\subsection{Communication}
+Deriving ToJson and Elm code from Haskell types
+\subsection{Pretty printing}
+
+\chapter{Results}
+\section{Tour of the tool}
+Basic outline to prepare for the 'experiments' ahead
+
+\section{Lists vs Streams}
+
+\section{Performance reggression at Channable}
+
+\chapter{Discussion}
+\section{Scalability of the tech stack}
+\section{Post Core factors}
+\subsection{STG \& backends}
+Core2Core isn't everything
+
+\chapter{Conclusion}
+
+
+
+
 
 \bibliographystyle{abbrv}
 \bibliography{refs}
