@@ -7,6 +7,7 @@
 \usepackage{amssymb}
 \usepackage{amsmath}
 \usepackage{graphicx}
+\usepackage[capitalise]{cleveref}
 \usepackage{enumitem}
 \usepackage{float}
 \usepackage{microtype}
@@ -41,6 +42,9 @@
       \vfil}%
   }%
 }
+
+\newcommand{\hs}{\mintinline{haskell}}
+\newcommand{\mono}{\mintinline{text}}
 
 \begin{document}
 
@@ -117,21 +121,9 @@ well as user provided information (pragmas and rewrite rules)
 \section{Non-functional testing}
 Testing the shape of the compilation artifacts can be important for performant code (hint: text lib)
 
-\chapter{Background}
-\section{GHC Core}
-Simple AST
-\section{Perfect optimisation is intractable}
-More about the bullets in the gun and how the order matters and finding a fixpoint is hard (intractable?). Rewrite rules
-can be a garguantuan difference in success/failure 
+\input{chapters/Background.tex}
+\newpage
 
-\chapter{Contemporary Haskell comprehension}
-The current capabilities to inspect core as well as analogies from the industry that show the need for something better
-
-\section{Current tooling}
-\subsection{Plain GHC telemetry}
-GHC flags etc.
-\subsection{GHC Plugins}
-Existing snapshot plugins. Good start (Ben's is even version agnostic), but does not provide an amazing user experience.
 
 \section{A case for better tooling}
 \subsection{Fusion in DPH}
@@ -167,6 +159,8 @@ All about ELM, JSON, and why it may be suboptimal
 \subsection{Communication}
 Deriving ToJson and Elm code from Haskell types
 \subsection{Pretty printing}
+
+\subsection{Performance \& Optimisations}
 
 \chapter{Results}
 \section{Tour of the tool}

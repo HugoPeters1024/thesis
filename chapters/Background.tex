@@ -1,0 +1,171 @@
+\chapter{Background}
+
+Before we proceed we shall first set the stage by discussing in depth the GHC's intermediate language and its
+accessory set of optimisation transformations. We then discuss its occasional shortcomings to make the point that
+inspecting GHC's intermediate results is necessary at times. 
+Finally we summarize contemporary solutions to that problem and how they can be unsatisfactory.
+
+\section{GHC: an optimising compiler}
+
+GHC is an optimising compiler, meaning that it is not just expected to convert Haskell source to a semantically equivalent binary,
+it also attempts to apply correctness-preserving transformations that reduce runtime costs. Given that a Haskell program is very
+restricted when it comes to effects, such transformations are empowered to make large changes.
+
+\subsection{Example: \mono{triangular}}
+Consider for example the function that given a positive integer \mono{n}, returns the \mono{n}th triangular number (i.e. sum of all integers up to and including \mono{n}).
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+triangular :: Int -> Int
+triangular 0 = 0
+triangular n = n + triangular (n-1)
+\end{minted}
+\caption{\mono{GHC -O0}: The triangular function in plain Haskell}
+\end{listing}
+
+Compiling this definition, disabling any optimisations using \mono{-O0}, will yield a very suboptimal binary. The main
+reason for this are heap allocations. Namely, Haskell's non strictness semantics mean that values can also represent
+future calculations. Because the size of these so-called \textit{thunks} is not known at compile time, almost all
+values are heap allocated, which is usually more costly than allocating on the stack. We can represent the
+unoptimized \mono{triangular} program as a C program with equivalent allocation behavior:
+
+\begin{listing}[H]
+\begin{minted}{c}
+#include <stdio.h>
+#include <stdlib.h>
+
+long* alloc_long() { return (long*)malloc(sizeof(long)); }
+
+long* triangular(const long* n_ptr) {
+  long* ret = alloc_long();
+  long n = *n_ptr;
+  if (n==0) {
+    *ret = 0;
+  } else {
+    long* inp_ptr = alloc_long();
+    *inp_ptr = n-1 ;
+    *ret = n + *triangular(inp_ptr);
+  }
+  return ret;
+}
+\end{minted}
+\caption{\mono{Heap-C}: The triangular function in C, heap allocating intermediate results}
+\end{listing}
+
+If we do enable GHC's optimisation passes, we find that an auxiliary definition is created that operates
+on the stack allocated and strict, \textit{boxed integer} (\hs{type Int = I# Int#}). A value of type \mono{Int#} 
+is always strict. From this follows that the size is always 64 bits and thus stack allocations are possible.
+This signficantly reduces the number of allocations and improves performance. Aside from a number of simplification 
+steps, most of the heavy lifting is done here by the \textit{Worker Wrapper binds} pass to yield the following listing:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+wtriangular :: Int# -> Int#
+wtriangular ww = case ww of
+  { 0 -> 0
+    ds -> case wtriangular
+                 (GHC.Prim.-# ds 1) of
+      { ww -> GHC.Prim.+# ds ww
+      }
+  }
+
+triangular :: Int -> Int
+triangular w = case w of
+  { I# ww -> case wtriangular ww of
+      { ww -> GHC.Types.I# ww
+      }
+  }
+\end{minted}
+\caption{\mono{GHC -01}: The triangular function in Haskell, with reduced heap allocations. As produced by compiling with \mono{-O1}.}
+\end{listing}
+
+We can profile the result of each of the two Haskell snippets above to get an idea of the runtime impact. 
+
+\begin{table}[H]
+\begin{tabular}{|l|l|}
+\textbf{Snippet} & \textbf{Result of \mono{time}}\\
+\hline \\
+\mono{GHC -O0} & 0,10s user 0,03s system 99\% cpu 0,132 total \\
+\mono{GHC -O1} & 0,01s user 0,01s system 98\% cpu 0,023 total \\
+\end{tabular}
+\caption{The runtime of each listing. We can see that the optimisation has increased runtime performance by a significant factor.}
+\end{table}
+
+
+\subsection{Splitting responsibility}
+
+We discussed how GHC is able to make some pretty drastic changes to the source to increase performance.
+Such a transform would conceivably be of type  \hs{HsModule -> HsModule}. However, Haskell is a very rich language
+with many language features, and its AST has dozens of constructors to represent all these possibilities.
+Developing aforementioned transformations on the source would be a particularly strenuous task, not to mention verifying 
+their correctness-preserving property (even empirically). Luckily, upon further inspection it becomes apparent that many
+language features are syntax sugar for - or similarly simple to convert to - other constructors.
+
+This idea is in fact exploitable to such a great extent, that all Haskell source programs can be projected onto a much
+smaller, but semantically equivalent \textit {Core}-language. This leads to a setup with 3 steps with very distinct responsibilities.
+
+\begin{itemize}
+  \item The frontend parses and typechecks the source and converts it to core. The latter stage is called \textit{desugaring}
+  \item The middle consists of a sequence of Core-to-Core transformations, responsible for most of the optimisation work.
+  \item The back end translates the final core program into machine code, considering only the low level optimisations that the middle stage cannot.
+\end{itemize}
+
+The goal is that the bulk of the optimisation work is done in the middle through separately verifiable, compact, transformations. \cite{haskell_optimisations_1997}
+
+\subsection{A Core Language}
+
+As we already eluded to in the previous section, there exists something called the \textit{core} language (Which we will simply refer to as Core from now on).
+The Core AST can be defined in all its brevity as follows:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+data Expr
+  | Var Id
+  | Lit Literal
+  | App Expr Expr
+  | Lam Bndr Expr
+  | Let Bind Expr
+  | Case Expr Bndr Type [Alt]
+  | Cast Expr CoercionR -- safe coercions are required for GADTs
+  | Tick Tickish Expr  -- annotation that can contain some meta data
+  | Type Type
+  | Coercion Coercion
+  
+data Alt = Alt AltCon [Bndr] Expr
+ 
+data Bind
+  = NonRec Bndr Expr
+  = Rec [(Bndr, Expr)]
+  
+-- the Id type contains information about
+-- a variable, like it's name, a unique identifier
+-- and analysis results
+type Bndr = Id
+\end{minted}
+\caption{Slightly simplified definition of the core language.}
+\label{code:core_def}
+\end{listing}
+
+Writing an optimisation transformation essentially of type \hs{[Bind] -> [Bind]} does not now seem
+as daunting given the drastically reduced number of cases to consider. 
+Last but not least, maintaining and debugging transformations is likewise a lighter task.
+
+\section{Perfect optimisation is intractable}
+
+Although we mentioned how optimisations are implemented as separate passes that are applied sequentially, we have
+not discussed the order of this sequence. And yet, this order matters a lot in practice. 
+
+Cascade effect
+
+More about the bullets in the gun and how the order matters and finding a fixpoint is hard (intractable?). Rewrite rules
+can be a gargantuan difference in success/failure.
+
+\section{Contemporary Haskell comprehension}
+The current capabilities to inspect core as well as analogies from the industry that show the need for something better
+
+\subsection{Current tooling}
+
+\subsection{Plain GHC telemetry}
+GHC flags etc.
+\subsection{GHC Plugins}
+Existing snapshot plugins. Good start (Ben's is even version agnostic), but does not provide an amazing user experience.
