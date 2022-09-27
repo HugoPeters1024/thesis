@@ -55,7 +55,7 @@ long* triangular(const long* n_ptr) {
 If we do enable GHC's optimisation passes, we find that an auxiliary definition is created that operates
 on the stack allocated and strict, \textit{boxed integer} (\hs{type Int = I# Int#}). A value of type \mono{Int#} 
 is always strict. From this follows that the size is always 64 bits and thus stack allocations are possible.
-This signficantly reduces the number of allocations and improves performance. Aside from a number of simplification 
+This significantly reduces the number of allocations and improves performance. Aside from a number of simplification 
 steps, most of the heavy lifting is done here by the \textit{Worker Wrapper binds} pass to yield the following listing:
 
 \begin{listing}[H]
@@ -150,17 +150,129 @@ Writing an optimisation transformation essentially of type \hs{[Bind] -> [Bind]}
 as daunting given the drastically reduced number of cases to consider. 
 Last but not least, maintaining and debugging transformations is likewise a lighter task.
 
-\section{Perfect optimisation is intractable}
+\section{The cascade effect}
 
 Although we mentioned how optimisations are implemented as separate passes that are applied sequentially, we have
-not discussed the order of this sequence. And yet, this order matters a lot in practice. 
+not discussed the order of this sequence. This matters because dramatic consequences can unfold from the slightest of
+changes in the optimisation pipeline. This phenomenon is coined as the \textit{Cascade effect} \cite{haskell_optimisations_1997}.
 
-Cascade effect
+\subsection{Example: Tree}
+A commonly encountered situation where the cascade effect comes into play,
+is the tug-of-war between in-lining functions (replacing a function call with its RHS) and applying rewrite rules. Consider
+the following example of a binary tree,  a function to that facilitates mapping over each \hs{Leaf}, as well a function
+that calculates the square root of each leaf node and returns 0 if there is no such whole number:
 
-More about the bullets in the gun and how the order matters and finding a fixpoint is hard (intractable?). Rewrite rules
-can be a gargantuan difference in success/failure.
+\begin{listing}[H]
+\begin{minted}{haskell}
+module Tree where
+import Data.Maybe (fromMaybe)
+
+data Tree a = Leaf a 
+            | Node (Tree a) (Tree a) 
+            deriving Show
+
+{-# Rules
+   "mapTree/mapTree"   forall f g.   mapTree f . mapTree g    = mapTree (f. g)   ;
+#-}
+
+mapTree :: (a -> b) -> Tree a -> Tree b
+mapTree f (Leaf x) = Leaf (f x)
+mapTree f (Node lhs rhs) = Node (mapTree f lhs) (mapTree f rhs)
+
+intSqrt :: Int -> Maybe Int
+intSqrt n = go n
+  where go x
+          | x * x > n    = go (x-1)
+          | x * x == n   = Just x
+          | otherwise    = Nothing
+
+
+treeSqrt :: Tree Int -> Tree Int
+treeSqrt = mapTree (fromMaybe 0) . mapTree intSqrt
+\end{minted}
+\caption{A module defining a binary tree along with a mapping function and the auxiliary treeSqrt
+function that composes said mapping.}
+\label{listing:Tree}
+\end{listing}
+
+The \mono{treeSqrt} function is implemented non-optimally; by traversing
+over the three structure twice, an intermediate structure will be allocated.
+Or at the very least the structure will have to be traversed twice.
+
+To combat this issue, \cref{listing:Tree} has been given the 
+rewrite rule \textit{mapTree/mapTree}. This rule informs GHC of the ability
+to \textit{fuse} a subsequent tree mapping. This rules is considered a form
+of \textit{deforestation}: The elimination of intermediate structures \cite{WADLER1990231}.
+
+Aforementioned effort was in vain however: the rule never fired! The reason for is - as was
+foreshadowed - an interference with the inliner. Before our rule is considered, \mono{treeSqrt}
+is transformed by in-lining \mono{(.)} which produces: 
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+treeSqrt :: Tree Int -> Tree Int
+treeSqrt tree = mapTree (fromMaybe 0) (mapTree intSqrt tree)
+\end{minted}
+\caption{\mono{treeSqrt} after inlining \hs{(.)}}
+\label{listing:Tree_inlined}
+\end{listing}
+
+But this no longer matches the LHS of our \mono{mapTree/mapTree} rule. What we have thus shown
+is that we could improve the optimisation pipeline in this specific case by considering our
+rewrite rule before we inline a function. However, it does not take much imagination to
+realise that there will be many other programs will which the opposite holds.
+
+The important point is that one optimisation may open or close the door to many other
+optimisations down the road. It thus becomes clear that the interaction of a haskell program
+with the optimiser may be quite unstable and consequently sensitive to small changes in
+multiple dimensions. Not only small changes in the source but also a minor release of
+the compiler. Thus, we cannot trust that our successfully optimised program will remain
+optimised in the future.
+
+\subsubsection{A small note about \mono{Tree}}
+
+It is important to mention that even though \mono{treeSqrt} seems a little contrived,
+this compositional style of programming is very persuasive in functional languages.
+Hardly surprising, given how elegant and convenient it is, not to mention encouraged
+by the base library by providing many functions over lists for example. Fortunately,
+this would also give us access to a myriad of careful designed rewrite rules. As a result,
+should we implement the \mono{Functor} type class for the type \hs{Tree}, providing
+\mono{mapTree} as an implementation for \mono{fmap}, then GHC will be playing a home game 
+and automatically fuse the subsequent \mono{fmap} applications for us.
+
+\subsection{Perfect optimisation is intractable}
+
+We have already hammered on the fact that the optimisation pipeline if very sensitive
+and one should not trust it to be a one size fits all solution for all programs. Why
+then you might ask, do we suggest to work around that problem instead of fixing it?
+Are we not putting out fires without plugging the gas leak? After all, if we could
+create a perfect, generic, optimisation pipeline and prove it be so, we could all
+go home.
+
+Unfortunately this proposition is intractable as can be shown by reducing from the
+Halting-problem.
+
+\begin{itemize}
+  \item Let's assume we have a function $opt$ such that forall programs $P$ it produces the optimal, semantically equivalent, program $\hat{P} = opt(P)$
+  \item We could use $opt$ to answer the decision problem whether some pair of programs $(P_{1}, P_{2})$ are semantically equivalent ($\sim$) by mapping them to their
+    shared optimal form such that $opt(P_{1}) = opt(P_{2}) \Rightarrow P_{1} \sim P_{2}$.
+  \item It is defined that semantically equivalent programs produce the same output such that $P_{1} \sim P_{2} \Rightarrow O(P_{1}) = O(P_{2})$.
+  \item Thus, in answering equivalence, we have inadvertent also shown that programs have output and do in fact terminate, solving the Halting-problem.
+    Therefore, $opt$ cannot exist.
+\end{itemize}
+
+In short, we cannot get around the fact that each program we write may require specific manual
+effort to be made more efficient.
+
+\section{Non-Functional requirements}
+
+Producing the correct answer is usually not enough to make a program truly `great'.
+The very popular \mono{text} library makes the following promises: `Most of the functions in this module are subject to
+fusion, meaning that a pipeline of such functions will usually allocate at most one Text value.' \cite{functional_testing}
+
 
 \section{Contemporary Haskell comprehension}
+
 The current capabilities to inspect core as well as analogies from the industry that show the need for something better
 
 \subsection{Current tooling}
