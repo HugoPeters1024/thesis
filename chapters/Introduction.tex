@@ -1,0 +1,110 @@
+\chapter{Introduction}
+
+\section{GHC, an optimising compiler}
+
+\subsection{Write good code not fast code}
+Haskell is a high level language designed to write highly composable functions.
+This leads to a juxtaposition where programmers are encouraged to write code that
+is not necessarily fast to evaluate. An extremely common example is the composition
+of list operations. Consider the function \mono{halves} which divides each element
+in a list of \mono{Int}s, discarding those that are not a multiple of 2.
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+halves :: [Int] -> [Int]
+halves = map (`div` 2) . filter even
+\end{minted}
+\end{listing}
+
+Both \mono{map} and \mono{filter} are defined as a loop over a list, constructing a new one. 
+If \mono{halves} were to be compiled as is, it would produce two loops as well as allocating
+an intermediate list. Of course, it would be possible to rewrite the function to circumvent this
+issue:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+halves_fast :: [Int] -> [Int]
+halves_fast [] = []
+halves_fast (x:xs) = 
+  let 
+    tl = halves_fast xs 
+  in if even x 
+     then (x `div` 2):tl
+     else tl
+\end{minted}
+\end{listing}
+
+But requiring the programmer to do such rewrites manually tragically undermines
+the virtue of compositional style programming. Code simply would be harder to read, write,
+and maintain and consequently tend to be less correct. 
+
+Luckily, GHC does address this issue - and many others - with an extensive set of optimisation transformations.
+This particular program will benefit greatly from the fusion system which specifically deals with removing
+the intermediate lists. This a well-established optimisation that is also referred to as deforestation. \cite{WADLER1990231}
+
+As a result, compiling with these optimisations enabled will result in a syntactically equivalent
+definition for \mono{halves} and \mono{halves_fast}.
+
+\subsection{The cascade effect}
+
+Optimisation transformations are applied is a certain order, giving rise to the \textit{cascade effect}. \cite{haskell_optimisations_1997}
+This effect refers to the dramatic consequences that the order of transformations can have. 
+
+Let us study another example that showcases a problematic tug-of-war between in-lining functions
+and applying rewrite rules. In-lining is very common optimisation that simply replaces variables
+with their definition. This reduces the need to allocate thunks for let bound variables as well as 
+
+A commonly encountered situation where the cascade effect comes into play,
+is the tug-of-war between in-lining functions (replacing a function call with its RHS) and applying rewrite rules. Consider
+the following example of a binary tree,  a function to that facilitates mapping over each \hs{Leaf}, as well a function
+that composes two integer additions over the tree.
+
+\begin{minted}[linenos]{haskell}
+module Tree where
+
+data Tree a = Leaf a | Node (Tree a) (Tree a) deriving Show
+
+mapTree :: (a -> b) -> Tree a -> Tree b
+mapTree f (Leaf x) = Leaf (f x)
+mapTree f (Node lhs rhs) = Node (mapTree f lhs) (mapTree f rhs)
+
+addFive :: Tree Int -> Tree Int
+addFive = mapTree (+1) . mapTree (+4)
+\end{minted}
+
+The \mono{addFive} function is implemented non-optimally; by traversing
+over the tree structure twice, an intermediate structure will be allocated
+and the structure will have to be traversed twice.
+
+To combat this issue, we could add the rewrite rule \textit{mapTree/mapTree}:
+\begin{minted}[linenos]{haskell}
+{-# Rules
+   "mapTree/mapTree"   forall f g.   mapTree f . mapTree g    = mapTree (f. g)   ;
+#-}
+\end{minted}
+
+This rule informs GHC of the ability to \textit{fuse} a subsequent tree mapping.
+This rules is considered a form of \textit{deforestation}: 
+The elimination of intermediate structures \cite{WADLER1990231}.
+
+Sadly however, the effort was in vain: the rule never fired! The reason - as was
+foreshadowed - is interference with the in-liner. Before our rule is considered, \mono{addFive}
+is transformed by eta expanding and in-lining \mono{(.)} which produces: 
+
+\begin{minted}{haskell}
+addFive :: Tree Int -> Tree Int
+addFive x = mapTree (+1) (mapTree (+4) x)
+\end{minted}
+
+But this no longer syntactically matches the LHS of our \mono{mapTree/mapTree} rule. What we have thus shown
+is that we could improve the optimisation pipeline in this specific case by considering our
+rewrite rule before we inline a function. On contrary, it does not take much imagination to
+realise that there will be many other programs for which the opposite holds.
+
+The important point is that one optimisation may open or close the door to many other
+optimisations down the road. It thus becomes clear that the interaction of a Haskell program
+with the optimiser may be quite unstable and consequently sensitive to small changes. 
+Changes not only in the source but also in the build environment (a minor release of
+the compiler comes to mind). Thus, we cannot trust that our successfully optimised program will remain
+optimised in the future. We observe that each program we write may require specific, manual, 
+effort to be made more efficient.

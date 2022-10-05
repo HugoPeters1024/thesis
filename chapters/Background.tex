@@ -15,12 +15,12 @@ restricted when it comes to effects, such transformations are empowered to make 
 Consider for example the function that given a positive integer \mono{n}, returns the \mono{n}th triangular number (i.e. sum of all integers up to and including \mono{n}).
 
 \begin{listing}[H]
-\begin{minted}{haskell}
+\begin{minted}[linenos]{haskell}
 triangular :: Int -> Int
 triangular 0 = 0
 triangular n = n + triangular (n-1)
 \end{minted}
-\caption{\mono{GHC -O0}: The triangular function in plain Haskell}
+\caption{\mono{GHC -O0}: The triangular function in plain Haskell, left untouched by compiling with \mono{-O0}}
 \end{listing}
 
 Compiling this definition, disabling any optimisations using \mono{-O0}, will yield a very suboptimal binary. The main
@@ -29,19 +29,15 @@ future calculations. Because the size of these so-called \textit{thunks} is not 
 values are heap allocated, which is usually more costly than allocating on the stack. We can represent the
 unoptimized \mono{triangular} program as a C program with equivalent allocation behavior:
 
-\begin{listing}[H]
-\begin{minted}{c}
+\begin{minted}[linenos]{c}
 #include <stdio.h>
 #include <stdlib.h>
 
 long* alloc_long() { return (long*)malloc(sizeof(long)); }
-
 long* triangular(const long* n_ptr) {
   long* ret = alloc_long();
   long n = *n_ptr;
-  if (n==0) {
-    *ret = 0;
-  } else {
+  if (n==0) { *ret = 0; } else {
     long* inp_ptr = alloc_long();
     *inp_ptr = n-1 ;
     *ret = n + *triangular(inp_ptr);
@@ -49,17 +45,15 @@ long* triangular(const long* n_ptr) {
   return ret;
 }
 \end{minted}
-\caption{\mono{Heap-C}: The triangular function in C, heap allocating intermediate results}
-\end{listing}
 
 If we do enable GHC's optimisation passes, we find that an auxiliary definition is created that operates
-on the stack allocated and strict, \textit{boxed integer} (\hs{type Int = I# Int#}). A value of type \mono{Int#} 
+on \textit{unboxed integers} (\hs{type Int = I# Int#}), where a value of type \mono{Int#} 
 is always strict. From this follows that the size is always 64 bits and thus stack allocations are possible.
-This significantly reduces the number of allocations and improves performance. Aside from a number of simplification 
-steps, most of the heavy lifting is done here by the \textit{Worker Wrapper binds} pass to yield the following listing:
+This significantly reduces the number of heap allocations and improves performance. Aside from a number of simplification 
+steps, most of the heavy lifting is done here by the \textit{Worker Wrapper binds} pass to yield the following optimised program:
 
 \begin{listing}[H]
-\begin{minted}{haskell}
+\begin{minted}[linenos]{haskell}
 wtriangular :: Int# -> Int#
 wtriangular ww = case ww of
   { 0 -> 0
@@ -79,7 +73,8 @@ triangular w = case w of
 \caption{\mono{GHC -01}: The triangular function in Haskell, with reduced heap allocations. As produced by compiling with \mono{-O1}.}
 \end{listing}
 
-We can profile the result of each of the two Haskell snippets above to get an idea of the runtime impact. 
+We can profile the result of each of the two Haskell snippets above to get an idea of the runtime impact, showing the
+importance of this transformation pipeline.
 
 \begin{table}[H]
 \begin{tabular}{|l|l|}
@@ -102,11 +97,11 @@ their correctness-preserving property (even empirically). Luckily, upon further 
 language features are syntax sugar for - or similarly simple to convert to - other constructors.
 
 This idea is in fact exploitable to such a great extent, that all Haskell source programs can be projected onto a much
-smaller, but semantically equivalent \textit {Core}-language. This leads to a setup with 3 steps with very distinct responsibilities.
+smaller, but semantically equivalent \textit{core}-language. This leads to a setup with 3 steps with very distinct responsibilities.
 
 \begin{itemize}
   \item The frontend parses and typechecks the source and converts it to core. The latter stage is called \textit{desugaring}
-  \item The middle consists of a sequence of Core-to-Core transformations, responsible for most of the optimisation work.
+  \item The middle consists of a sequence of core-to-core transformations, responsible for most of the optimisation work.
   \item The back end translates the final core program into machine code, considering only the low level optimisations that the middle stage cannot.
 \end{itemize}
 
@@ -114,8 +109,8 @@ The goal is that the bulk of the optimisation work is done in the middle through
 
 \subsection{A Core Language}
 
-As we already eluded to in the previous section, there exists something called the \textit{core} language (Which we will simply refer to as Core from now on).
-The Core AST can be defined in all its brevity as follows:
+As we already eluded to in the previous section, there exists something called the \textit{core} language (Which we will simply refer to as core from now on).
+The core AST can be defined in all its brevity as follows:
 
 \begin{listing}[H]
 \begin{minted}{haskell}
@@ -150,134 +145,133 @@ Writing an optimisation transformation essentially of type \hs{[Bind] -> [Bind]}
 as daunting given the drastically reduced number of cases to consider. 
 Last but not least, maintaining and debugging transformations is likewise a lighter task.
 
-\section{The cascade effect}
-
-Although we mentioned how optimisations are implemented as separate passes that are applied sequentially, we have
-not discussed the order of this sequence. This matters because dramatic consequences can unfold from the slightest of
-changes in the optimisation pipeline. This phenomenon is coined as the \textit{Cascade effect} \cite{haskell_optimisations_1997}.
-
-\subsection{Example: Tree}
-A commonly encountered situation where the cascade effect comes into play,
-is the tug-of-war between in-lining functions (replacing a function call with its RHS) and applying rewrite rules. Consider
-the following example of a binary tree,  a function to that facilitates mapping over each \hs{Leaf}, as well a function
-that calculates the square root of each leaf node and returns 0 if there is no such whole number:
-
-\begin{listing}[H]
-\begin{minted}{haskell}
-module Tree where
-import Data.Maybe (fromMaybe)
-
-data Tree a = Leaf a 
-            | Node (Tree a) (Tree a) 
-            deriving Show
-
-{-# Rules
-   "mapTree/mapTree"   forall f g.   mapTree f . mapTree g    = mapTree (f. g)   ;
-#-}
-
-mapTree :: (a -> b) -> Tree a -> Tree b
-mapTree f (Leaf x) = Leaf (f x)
-mapTree f (Node lhs rhs) = Node (mapTree f lhs) (mapTree f rhs)
-
-intSqrt :: Int -> Maybe Int
-intSqrt n = go n
-  where go x
-          | x * x > n    = go (x-1)
-          | x * x == n   = Just x
-          | otherwise    = Nothing
-
-
-treeSqrt :: Tree Int -> Tree Int
-treeSqrt = mapTree (fromMaybe 0) . mapTree intSqrt
-\end{minted}
-\caption{A module defining a binary tree along with a mapping function and the auxiliary treeSqrt
-function that composes said mapping.}
-\label{listing:Tree}
-\end{listing}
-
-The \mono{treeSqrt} function is implemented non-optimally; by traversing
-over the three structure twice, an intermediate structure will be allocated.
-Or at the very least the structure will have to be traversed twice.
-
-To combat this issue, \cref{listing:Tree} has been given the 
-rewrite rule \textit{mapTree/mapTree}. This rule informs GHC of the ability
-to \textit{fuse} a subsequent tree mapping. This rules is considered a form
-of \textit{deforestation}: The elimination of intermediate structures \cite{WADLER1990231}.
-
-Aforementioned effort was in vain however: the rule never fired! The reason for is - as was
-foreshadowed - an interference with the inliner. Before our rule is considered, \mono{treeSqrt}
-is transformed by in-lining \mono{(.)} which produces: 
-
-\begin{listing}[H]
-\begin{minted}{haskell}
-treeSqrt :: Tree Int -> Tree Int
-treeSqrt tree = mapTree (fromMaybe 0) (mapTree intSqrt tree)
-\end{minted}
-\caption{\mono{treeSqrt} after inlining \hs{(.)}}
-\label{listing:Tree_inlined}
-\end{listing}
-
-But this no longer matches the LHS of our \mono{mapTree/mapTree} rule. What we have thus shown
-is that we could improve the optimisation pipeline in this specific case by considering our
-rewrite rule before we inline a function. However, it does not take much imagination to
-realise that there will be many other programs will which the opposite holds.
-
-The important point is that one optimisation may open or close the door to many other
-optimisations down the road. It thus becomes clear that the interaction of a haskell program
-with the optimiser may be quite unstable and consequently sensitive to small changes in
-multiple dimensions. Not only small changes in the source but also a minor release of
-the compiler. Thus, we cannot trust that our successfully optimised program will remain
-optimised in the future.
 
 \subsubsection{A small note about \mono{Tree}}
 
-It is important to mention that even though \mono{treeSqrt} seems a little contrived,
+It is important to mention that even though \mono{addFive} seems a little contrived,
 this compositional style of programming is very persuasive in functional languages.
-Hardly surprising, given how elegant and convenient it is, not to mention encouraged
-by the base library by providing many functions over lists for example. Fortunately,
-this would also give us access to a myriad of careful designed rewrite rules. As a result,
-should we implement the \mono{Functor} type class for the type \hs{Tree}, providing
-\mono{mapTree} as an implementation for \mono{fmap}, then GHC will be playing a home game 
-and automatically fuse the subsequent \mono{fmap} applications for us.
+Hardly surprising, given how elegant and convenient it is.
 
-\subsection{Perfect optimisation is intractable}
-
-We have already hammered on the fact that the optimisation pipeline if very sensitive
-and one should not trust it to be a one size fits all solution for all programs. Why
-then you might ask, do we suggest to work around that problem instead of fixing it?
-Are we not putting out fires without plugging the gas leak? After all, if we could
-create a perfect, generic, optimisation pipeline and prove it be so, we could all
-go home.
-
-Unfortunately this proposition is intractable as can be shown by reducing from the
-Halting-problem.
-
-\begin{itemize}
-  \item Let's assume we have a function $opt$ such that forall programs $P$ it produces the optimal, semantically equivalent, program $\hat{P} = opt(P)$
-  \item We could use $opt$ to answer the decision problem whether some pair of programs $(P_{1}, P_{2})$ are semantically equivalent ($\sim$) by mapping them to their
-    shared optimal form such that $opt(P_{1}) = opt(P_{2}) \Rightarrow P_{1} \sim P_{2}$.
-  \item It is defined that semantically equivalent programs produce the same output such that $P_{1} \sim P_{2} \Rightarrow O(P_{1}) = O(P_{2})$.
-  \item Thus, in answering equivalence, we have inadvertent also shown that programs have output and do in fact terminate, solving the Halting-problem.
-    Therefore, $opt$ cannot exist.
-\end{itemize}
-
-In short, we cannot get around the fact that each program we write may require specific manual
-effort to be made more efficient.
-
-\section{Non-Functional requirements}
-
-Producing the correct answer is usually not enough to make a program truly `great'.
-The very popular \mono{text} library makes the following promises: `Most of the functions in this module are subject to
-fusion, meaning that a pipeline of such functions will usually allocate at most one Text value.' \cite{functional_testing}
-
+In this example we cannot escape the need for defining rewrite rules since GHC has
+decided to not be the enforcer of functor-laws. That is, it will not assume that
+\mono{fmap f . fmap g = fmap (f. g)} because this could change the semantics of
+functors that have decided to violate this law.
 
 \section{Contemporary Haskell comprehension}
 
-The current capabilities to inspect core as well as analogies from the industry that show the need for something better
+\subsection{Communicating in core}
+\label{section:communicating_core}
+
+We are not pioneers discovering the land of core inspection. Since its inception, core representation have
+been used to communicate about programs and compiler interactions. Sifting through open issues on the
+GHC compiler itself, one quickly comes across discussions elaborated by a core snippet. Consider issue
+\href{https://gitlab.haskell.org/ghc/ghc/-/issues/22207}{\#22207} titled `\textit{bytestring Builder performance regressions after 9.2.3}' for example.
+\hfill \break
+
+\textit{While testing the performance characteristics of a bytestring patch meant to mitigate withForeignPtr-related performance regressions,
+it was noticed that several of our Builder-related benchmarks have also regressed seriously for unrelated reasons.
+The worst offender is byteStringHex, which on my machine runs about 10 times slower and allocates 21 times as much when using ghc-9.2.4 or ghc-9.4.2
+as it did when using ghc-9.2.3. Here's a small program that can demonstrate this slowdown:}
+\hfill \break
+
+It then provides two snippets containing the final core representation of \mono{byteStringHex} as produced by the two different GHC version.
+Each of these documents are around 400 lines of un-highlighted code with all available information. And while having all available information
+sounds like a good thing (and it is in a way) it poses a serious practicality issue.
+Namely: it is exceedingly difficult for a human to read and comprehend a certain aspect of the AST while having to filter out another.
+Not to mention, it solidifies reading core as an activity reserved for only the most expert Haskell developers by, scaring others away with
+a steep barrier to entry.
 
 \subsection{Current tooling}
+Efforts into making core inspection more approachable have been made. We discuss them here.
 
-\subsection{Plain GHC telemetry}
-GHC flags etc.
-\subsection{GHC Plugins}
-Existing snapshot plugins. Good start (Ben's is even version agnostic), but does not provide an amazing user experience.
+\subsubsection{Plain GHC telemetry}
+
+Core snippets of your program can easily be coerced out of GHC. The most information you can get
+is the core AST at each pass of the optimisation pipeline by using \mono{-ddump-core2core}.
+To reduce the signal-to-noise ratio of core snippets, one can use any number of suppression options.
+It is common to supress type arguments and type applications for example. These are largely
+uninteresting because core is only typed to facilitate the correctness preserving checks that core-lint performs
+and do not affect the compilation in any way.
+
+As can be read in the GHC documentation, the following suppression flags are available to help to tame the beast.
+
+\begin{table}[H]
+  \begin{tabular}{p{0.35\linewidth}|p{0.65\linewidth}}
+  \textbf{GHC flag} & \textbf{Effect on core printing} \\
+  \hline
+           & \\
+  \mono{-dsuppress-all} & In dumps, suppress everything (except for uniques) that is suppressible.  \\
+  \mono{-dsuppress-coercions} & Suppress the printing of coercions in Core dumps to make them shorter  \\
+  \mono{-dsuppress-core-sizes} & Suppress the printing of core size stats per binding (since 9.4)  \\
+  \mono{-dsuppress-idinfo} & Suppress extended information about identifiers where they are bound  \\
+  \mono{-dsuppress-module-prefixes} & Suppress the printing of module qualification prefixes  \\
+  \mono{-dsuppress-ticks} & Suppress "ticks" in the pretty-printer output.  \\
+  \mono{-dsuppress-timestamps} & Suppress timestamps in dumps  \\
+  \mono{-dsuppress-type-applications} & Suppress type applications  \\
+  \mono{-dsuppress-type-signatures} & Suppress type signatures  \\
+  \mono{-dsuppress-unfoldings} & Suppress the printing of the stable unfolding of a variable at its binding site  \\
+  \mono{-dsuppress-uniques} & Suppress the printing of uniques in debug output (easier to use diff)  \\
+  \mono{-dsuppress-var-kinds} & Suppress the printing of variable kinds\\
+\end{tabular}
+\end{table}
+
+\subsubsection{GHC Plugins}
+
+GHC --- being a playground for academics and enthusiasts alike --- is extremely flexible when it comes to
+altering its functionality. Using the now well established plugin interface, one is able to hook into almost
+any operation of the front- and midsection of the compiler. One such hook is managing the core2core passes that
+will be run on the current module. This point of entry can be used to intersperse each core2core pass with an
+identity transformation that smuggles away a copy of the AST in its full form.
+
+One such existing plugin is \mono{ghc-dump} \cite{ghc_dump}. Besides extracting intermediate ASTs, it defines an
+auxiliary core definition to which it provides a GHC version agnostic mapping. This has the increased benefit of 
+being able to directly compare snapshots from different GHC versions; A not uncommon task as discussed in \cref{section:communicating_core}.
+And while certainly being an improvement over plain text representation, we believe exploring and comparing such
+dumps requires a more rich interface.
+
+\subsection{Non-functional requirements: \mono{inspection-testing}}
+\label{section:background_inspection_testing}
+
+We know that producing the correct answer is usually not enough to make a program admissible,
+we also care about runtime and memory requirements. This collection of constraints are examples of 
+Non-functional requirements. In trying to meet these requirements, we expect an optimising compiler
+to do some of the heavy lifting. Compositional style programming like in Haskell puts even more
+faith in the compiler in this regard.
+
+To illustrate, the very popular \mono{text} library makes the following promise: `\textit{Most of the functions in this module are subject to
+fusion, meaning that a pipeline of such functions will usually allocate at most one Text value.}' \cite{inspection_testing}
+Such promises cannot be checked with traditional tests as they do not concern the functionality of the code. As such,
+they are considered to be \textit{Non-functional requirements}.
+
+As identified by Breitner \cite{inspection_testing}, the aforementioned promise by the \mono{text} library had in fact
+been broken in version \mono{1.2.3}, shown by the following counter example:
+
+\begin{minted}{haskell}
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.ByteString
+
+countChars :: ByteString -> Int
+countChars = T.length . T.toUpper . TE.decodeUtf8
+\end{minted}
+
+Although \mono{countChars} uses a value of type \mono{Text} during the computations, they need not exist
+considering that all operations can be done directly on the provided \mono{ByteString}. To fully comprehend
+that statement we have to take a look at the definition \hs{data Text = Text ByteString Int Int}. This definition
+helps us to see a \mono{Text} object is in fact just a \textit{view} into some bytestring by using an \hs{Int} for
+an offset and length parameter. Because the call \mono{length} collapses this view back to a simple integer, we
+should in theory be able to rewrite the definition without ever constructing this \mono{Text} object.
+As mentioned however, this was not the case in practice due to a missing rewrite rule.
+
+In itself this example formed the main motivation to develop a method to tests these non-functional requirements.
+The result is the \mono{inspection-testing} package. It provides the machinery necessary to add the following statement
+directly to the source file, preventing the same regression from occurring in the future.
+
+\begin{minted}{haskell}
+inspect $ 'countChars `hasNoType` ''T.Text
+\end{minted}
+
+Despite preemptively saving us from future regressions, the tests do not address the skill and fines required to identify
+and patch the underlying issue. In this very example the final core will have undergone many in-linings producing
+over 100 lines to painfully sift through without little more ergonomics than a string search. Moreover, we risk having
+to repeat this work in the future when diagnosing what lies at the origin of any such test failing in the future.

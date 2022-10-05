@@ -30,7 +30,7 @@ author = {Philip Wadler},
 abstract = {An algorithm that transforms programs to eliminate intermediate trees is presented. The algorithm applies to any term containing only functions with definitions in a given syntactic form, and is suitable for incorporation in an optimizing compiler.}
 }
 
-@article{functional_testing,
+@article{inspection_testing,
        author = {{Breitner}, Joachim},
         title = "{A promise checked is a promise kept: Inspection Testing}",
       journal = {arXiv e-prints},
@@ -44,4 +44,37 @@ archivePrefix = {arXiv},
  primaryClass = {cs.PL},
        adsurl = {https://ui.adsabs.harvard.edu/abs/2018arXiv180307130B},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+
+@book{implementing_fl,
+author = {Peyton Jones, Simon},
+title = {The Implementation of Functional Programming Languages},
+year = {1987},
+month = {January},
+abstract = {My 1987 book is now out of print, but it is available here in its entirety in PDF form, in one of two formats:
+
+ 	single-page portrait
+ 	double-page landscape
+
+Both are fully searchable, thanks to OCR and Norman Ramsey.
+
+Errata
+
+ 	Section 5.2.4, p87.  We need an extra rule
+
+match us [] E = E
+This accounts for the possibility that in the constructor rule (Section 5.2.4) there may be some non-nullary constructors for which there are no equations.
+
+
+ 	P168, line 2, "VAR" should be "TVAR".},
+publisher = {Prentice Hall},
+url = {https://www.microsoft.com/en-us/research/publication/the-implementation-of-functional-programming-languages/},
+}
+
+@misc{ghc_dump, 
+    author = {Ben Gamari},
+    title = {ghc-dump: https://github.com/bgamari/ghc-dump},
+    year = 2019,
+    url = {https://github.com/bgamari/ghc-dump},
+    urldate = {2022-04-08}
 }

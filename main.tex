@@ -14,12 +14,12 @@
 \usepackage[a4paper, margin=1in]{geometry}
 \usepackage{fancyvrb, newverbs, xcolor}
 \usepackage{caption}
-\usepackage[english]{babel}
+\usepackage[UKenglish]{babel}
 
 \definecolor{cverbbg}{gray}{0.93}
 \newcommand{\vtilde}{$\sim\ $}
 
-\newenvironment{code}{\vspace{0mm}\captionsetup{type=listing}}{\vspace{2mm}}
+% \newenvironment{code}{\vspace{0mm}\captionsetup{type=listing}}{\vspace{2mm}}
 \SetupFloatingEnvironment{listing}{name=Code Snippet}
 
 \newcommand{\spipe}{\quad\lvert\quad}
@@ -92,7 +92,7 @@
 \begin{center}
 \begin{minipage}{.7\textwidth}
 \centerline{\textbf{Abstract}}
-Some abstract can be written here
+\input{chapters/Abstract.tex}
 \end{minipage}
 \end{center}
 \vfill % equivalent to \vspace{\fill}
@@ -109,82 +109,160 @@ Some abstract can be written here
 \pagenumbering{arabic}
 
 %Add with newpage
-\input{chapters/Abstract.tex}
 \newpage
 
-\chapter{Introduction}
-\section{The Haskell programming language}
-Haskell is a language explicit about side effects which allows for pretty drastic semantic preserving transformations
-\section{Glasgow Haskell Compiler \& Optimisations}
-GHC uses an IL to define optimisation transformations whose success is greatly determined by the order of optimisations as
-well as user provided information (pragmas and rewrite rules)
-\section{Non-functional testing}
-Testing the shape of the compilation artifacts can be important for performant code (hint: text lib)
+\input{chapters/Introduction.tex}
+
+
+\chapter{Research Questions}
+
+
+\paragraph{Main Question} 
+How can GHC’s core2core passes be captured and presented in such a way that core
+inspection becomes a more successful, and easier task?
+
+\hfill \break
+
+\paragraph{Sub-Question 1} 
+How does one efficiently navigate where small changes occur in two or more captures?
+
+\paragraph{Sub-Question 2}
+How to make viewing core more manageable using various display options?
+
+\paragraph{Sub-Question 3}
+How could performance regressions that have occurred in the past in popular Haskell projects,
+have been resolved faster?
 
 \input{chapters/Background.tex}
 \newpage
 
 
-\section{A case for better tooling}
-\subsection{Fusion in DPH}
-\subsection{GHC maintainers}
-\subsection{Channable \& Text}
-\subsection{Compiler formalisation research}
-\subsection{Normalizing core inspection}
-
-\chapter{Research Questions}
-
-How can GHC’s core2core passes be captured and presented in such a way that core
-inspection becomes a more successful, and easier task?
-
-How does one quickly detect and present where small changes occur in two or more captures?
-  (something about toplevel alpha renaming hashing)
-
-How to make viewing core more manageable using various display options?
-
-How could performance regressions that have occurred in the past in popular Haskell projects,
-have been resolved faster (using HsComprehension)?
-
 \chapter{Methods}
 
-\section{Gathering all available information}
+\section{Defining the requirements}
+
+\begin{itemize}
+  \item GHC version agnostic (to where reasonable i.e. 8.4 onwards)
+  \item Simple and non invase steps to create dumps
+  \item Cross platform ability to explore dumps
+  \item Not everything needs to be supported (think unfoldings) but should be extendible in the future
+\end{itemize}
+
+\section{Creating the GHC plugin}
+
+\subsection{Capturing the information}
 All about the what GHC encodes in core (IdInfo etc.)
 
-\section{Capturing and saving the information}
 \subsection{Globally unique variables}
+Explaining the transformation that freshens all shadowed uniques in a module
 
-\section{Frontend application}
+\subsection{Hashing toplevel definitions}
+Full fletched expression comparision is hard, but comparing only toplevel definitions by their hash
+is a manageable compromise that still allows elimating large chunks of noise.
+
+\section{Creating the frontend application}
 All about ELM, JSON, and why it may be suboptimal
 
 \subsection{Communication}
 Deriving ToJson and Elm code from Haskell types
-\subsection{Pretty printing}
 
-\subsection{Performance \& Optimisations}
+\subsection{Pretty printing}
+Creating a beginner-friendly core representation
+
+\subsection{Including the source}
+Using python3-pygments to generate highlighted html that can be hacked into the DOM directly
+
+\subsection{Performance considerations}
+Using the lazy html utility for the code pretty printer to ensure interactive
+update times for other DOM changes.
 
 \chapter{Results}
+
 \section{Tour of the tool}
 Basic outline to prepare for the 'experiments' ahead
 
 \section{Lists vs Streams}
+Here we discuss the basic of the stream paper, how it operates, why haskell has moved on by using join points and
+finally how the compilation pipeline treats these 2.
 
-\section{Performance reggression at Channable}
+\section{Diagnosing a failing inspection test}
+
+Hearkening back to \mono{inspection-testing} discussed in \cref{section:background_inspection_testing}, we put
+ourselves in the shoes of a programmer who gets surprised by a failing inspection test and reason how she might
+employ HsComprehension to diagnose the problem. She breaks the process down into a number of steps.
+
+\paragraph{1. Isolate the problem}
+Modules typically contain more than 1 function and during the core2core transformations many more auxiliary functions are
+added and many functions are inlined to produce exponentially more code. To get good data it is helpful to temporarily isolate the
+failing test case into a separate module. She is able to reproduce the following minimal case:
+
+
+\begin{minted}{haskell}
+{-# LANGUAGE TemplateHaskell #-}
+
+module InspectionTests where
+
+import Test.Inspection
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.ByteString
+
+countChars :: ByteString -> Int
+countChars = T.length . T.toUpper . TE.decodeUtf8
+
+-- the failing test case
+inspect $ 'countChars `hasNoType` ''T.Text
+\end{minted}
+
+The following error is produced by the build:
+
+\begin{minted}{sh}
+app/InspectionTests.hs:21:1: countChars `hasNoType` Data.Text.Internal.Text failed:
+# ...
+# 700 lines of core as seen at the end of the core2core pipeline
+# ...
+\end{minted}
+
+So despite isolating the problem, the amount of textual data generate is still unwieldy.
+It is also incomplete in the sense that it does not show the process that produced this final
+artefact.
+
+\paragraph{2. Creating a dump}
+
+
+
+
+% Trying to reach the same conclusion as https://github.com/haskell/text/issues/202 (recursing into the mentioned https://github.com/haskell/text/pull/348)
+
+
+\section{Performance regression at Channable}
+
+%https://github.com/haskell/text/issues/202
+%https://github.com/haskell/text/pull/348
+%
+%Another performance regression: https://gitlab.haskell.org/ghc/ghc/-/issues/22207
+
 
 \chapter{Discussion}
-\section{Scalability of the tech stack}
+
+\section{Review of the tech stack}
+Elm does not provide amazing performance given the domain (mostly due to being strict),
+but it does make it easy to write haskell like code over an AST and thus requires less skill
+for other haskell programmers to contribute to. The final result is also just a website which is
+very minimal barrier to entry and can be used to share things.
+
+\section{Printing Core like GHC}
+If we truly wish to be a useful tool for GHC developers and experts alike, we must respect
+that the current core printer form is well established and should provide at least a mode in which
+the tool prints in a very similar manner. This does not imply that a different beginner mode, as you
+could call the current state of affairs, that prints a more readable, slightly desugared version, 
+is not also invaluable in itself.
 \section{Post Core factors}
-\subsection{STG \& backends}
-Core2Core isn't everything
-
-\chapter{Conclusion}
-
-
-
-
+Core2Core isn't everything, like in this issue: https://github.com/channable/alfred-margaret/issues/24.
+Things like STG and the backend are also part of the equation.
 
 \bibliographystyle{abbrv}
 \bibliography{refs}
-
 
 \appendix
 \clearpage
