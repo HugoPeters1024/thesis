@@ -2,12 +2,11 @@
 
 \section{GHC, an optimising compiler}
 
-\subsection{Write good code not fast code}
 Haskell is a high level language designed to write highly composable functions.
 This leads to a juxtaposition where programmers are encouraged to write code that
 is not necessarily fast to evaluate. An extremely common example is the composition
 of list operations. Consider the function \mono{halves} which divides each element
-in a list of \mono{Int}s, discarding those that are not a multiple of 2.
+in a list of \mono{Int}s in halve, discarding those that are not a multiple of 2.
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -16,8 +15,8 @@ halves = map (`div` 2) . filter even
 \end{minted}
 \end{listing}
 
-Both \mono{map} and \mono{filter} are defined as a loop over a list, constructing a new one. 
-If \mono{halves} were to be compiled as is, it would produce two loops as well as allocating
+Both \mono{map} and \mono{filter} are defined as a loop over an input list, producing a new list as output. 
+If code was generated for \mono{halves} in its current form, it would produce two loops as well as allocate
 an intermediate list. Of course, it would be possible to rewrite the function to circumvent this
 issue:
 
@@ -43,25 +42,139 @@ This particular program will benefit greatly from the fusion system which specif
 the intermediate lists. This a well-established optimisation that is also referred to as deforestation. \cite{WADLER1990231}
 
 As a result, compiling with these optimisations enabled will result in a syntactically equivalent
-definition for \mono{halves} and \mono{halves_fast}.
+definition for \mono{halves} and \mono{halves_fast}. But how do we check that this actually happened?
 
-\subsection{The cascade effect}
+\section{The cascade effect}
 
 Optimisation transformations are applied is a certain order, giving rise to the \textit{cascade effect}. \cite{haskell_optimisations_1997}
-This effect refers to the dramatic consequences that the order of transformations can have. 
+This effect refers to the dramatic consequences that the order of transformations can have. We will study an example that
+showcases a problematic tug-of-war between two optimisations in-lining and rewrite rules.
 
-Let us study another example that showcases a problematic tug-of-war between in-lining functions
-and applying rewrite rules. In-lining is very common optimisation that simply replaces variables
-with their definition. This reduces the need to allocate thunks for let bound variables as well as 
+\subsection{The inlining transformation}
 
-A commonly encountered situation where the cascade effect comes into play,
-is the tug-of-war between in-lining functions (replacing a function call with its RHS) and applying rewrite rules. Consider
-the following example of a binary tree,  a function to that facilitates mapping over each \hs{Leaf}, as well a function
-that composes two integer additions over the tree.
+Inlining is arguably the most important optimisation for any functional language. Surprisingly, it is also on the simplest to implement and comprehend. To understand
+why it is such a staple, we must consider it in conjunction with \textbeta-reduction. Both these
+transformations are formally defined as:
 
+\begin{multicols}{2}
+  \begin{equation}
+    \inference[inline]{(x,t') \in \Gamma \quad \Gamma \vdash t' \triangleright t}{\Gamma \vdash x \triangleright t}
+  \end{equation}
+  \break
+
+  \begin{equation}
+  \inference[reduce]{(\lambda x. e) a}{e[x = a]}
+  \end{equation}
+\end{multicols}
+
+We can apply this in a haskell context to get a more familiar perspective. 
+Consider an example of the negation function \mono{not} and a basic usage thereof:
+
+\begin{listing}[H]
 \begin{minted}[linenos]{haskell}
-module Tree where
+not :: Bool -> Bool
+not = \x -> if x then False else True
 
+top = True
+bottom = not top
+\end{minted}
+\end{listing}
+
+In the case of \hs{bottom} function we can elect to inline both \mono{not} and \mono{top}
+in its body. This gives us 
+
+\begin{listing}[H]
+\begin{minted}[]{haskell}
+bottom = (\x -> if x then False else True) True
+\end{minted}
+\end{listing}
+
+We can now perform \textbeta-reduction by taking the body of the lambda function
+and substituting \mono{x} by \mono{True}:
+
+\begin{listing}[H]
+\begin{minted}[]{haskell}
+bottom = if True then False else True
+\end{minted}
+\end{listing}
+
+Finally, we evaluate the \mono{if} statement knowing that it always takes the first branch, and
+get the final result of:
+
+\begin{listing}[H]
+\begin{minted}[]{haskell}
+bottom = True
+\end{minted}
+\end{listing}
+
+We can now see that thanks to this transformation duo, we have reduced an expression to a constant
+expression, eliminating any runtime cost. Because the inlining transformation so commonly goes hand
+in hand with \textbeta-reduction we will --- for brevity's sake --- silently assume that reduction also takes
+place after inlining if possible.
+
+In a sense we were lucky here that the body of the not function reduced so completely. In reality however
+it can be the case that function definitions are quite large. While inlining could then still be a good idea,
+it does come at the cost of larger code size. GHC uses a few crude heuristics to help with this decision but
+in practice inlining is almost always worth it. \ref{haskell_optimisations_1997}
+
+
+\subsubsection{Laziness and thunks}
+Being a lazy language, Haskell can profit from inlining in a secondary way as well. A well-established
+language feature is the let expression, a syntactically nice way bind extra definitions. Consider a function
+that decrypts the password of a user but only if it is the admin.
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+getAdminPassword :: User -> Maybe String
+getAdminPassword user = 
+  let decrypted :: String
+      decrypted = decryptSHA1 (password user)
+
+  in case (username user) of
+    "admin" -> Just decrypted
+    _       -> Nothing
+\end{minted}
+\end{listing}
+
+Obviously the \mono{decryptSHA1} is going to be an extremely cost heavy function that under no
+circumstances we wish to be evaluated unless absolutely necessary. Luckily, because Haskell is a
+lazy language the let assignment does not actually evaluate anything; it only allocates a so-called
+\textit{thunk}. Such a thunk represents an expression that is yet to be evaluated. So, because of
+this property this function is actually quite effective at avoiding unnecessary work. 
+
+Yet it can still
+be improved upon. Because while the let expression might not do any work it does require an allocation,
+which is not free. But because our let bound variable \mono{decrypted} is used exactly once, we can inline
+it at the use site without running the risk of duplicating the expensive operation. This yields the faster
+definition:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+getAdminPassword :: User -> Maybe String
+getAdminPassword user = case (username user) of
+    "admin" -> Just (decryptSHA1 (password user))
+    _       -> Nothing
+\end{minted}
+\end{listing}
+
+
+\subsection{Rewrite rules}
+
+We've seen how generic program transformation may improve performance. However, GHC can only use relatively
+shallow reasoning as to not jeopardize the correctness of transformations or explode compile times. 
+The programmer on the other hand may have much more in-depth knowledge about the domain of the program 
+and its intended behavior. \cite{playing_by_the_rules}.
+Programmers can leverage this knowledge by defining so-called \textit{rewrite rules}. They inform the compiler of
+substitutions that are not obvious or strictly speaking even correct.  
+
+Consider the binary tree datatype \mono{Tree} with along with a the higher order \mono{mapTree} functions that
+facilities transforming the values contained in the \mono{Leaf}s. We then use \mono{treeMap} to compose two
+traversals with an addition in the function \mono{addFive}. Obviously that function is rather contrived as
+an example of something that someone would write, but the pattern may very well show up during the transformation pipeline.
+
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
 data Tree a = Leaf a | Node (Tree a) (Tree a) deriving Show
 
 mapTree :: (a -> b) -> Tree a -> Tree b
@@ -71,6 +184,38 @@ mapTree f (Node lhs rhs) = Node (mapTree f lhs) (mapTree f rhs)
 addFive :: Tree Int -> Tree Int
 addFive = mapTree (+1) . mapTree (+4)
 \end{minted}
+\end{listing}
+
+By now it should be clear why \mono{addFive} is non-optimal; it has a superfluous traversal and allocates an
+intermediate structure. \hs{mapTree (+5)} is the far superior equivalent. However, for GHC to infer this fact
+it has to perform a too complicated and generic analysis. But we can add the rewrite rule \textit{treeMap/treeMap}
+to convince GHC that consecutive applications of \mono{treeMap} are allowed to fuse:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+{-# Rules
+   "mapTree/mapTree"   forall f g.   mapTree f . mapTree g    = mapTree (f. g)   ;
+#-}
+\end{minted}
+\end{listing}
+
+But as it turns out, \textit{mapTree/mapTree} never fired for a reason that is not immediately obvious.
+
+\subsection{Tug-of-war}
+
+A common manifestation of the cascade effect is the tug-of-war between inlining and the application
+of rewrite rules. Continuing with the \mono{Tree} example from the previous section, we find that losing this
+tug-of-war is the exact the reason that the \textit{mapTree/mapTree} rule never fired.
+
+A commonly encountered situation where the cascade effect comes into play,
+is the tug-of-war between in-lining functions (replacing a function call with its RHS) and applying rewrite rules. Consider
+the following example of a binary tree,  a function to that facilitates mapping over each \hs{Leaf}, as well a function
+that composes two integer additions over the tree.
+
+\begin{minted}[linenos]{haskell}
+module Tree where
+
+\end{minted}
 
 The \mono{addFive} function is implemented non-optimally; by traversing
 over the tree structure twice, an intermediate structure will be allocated
@@ -78,13 +223,10 @@ and the structure will have to be traversed twice.
 
 To combat this issue, we could add the rewrite rule \textit{mapTree/mapTree}:
 \begin{minted}[linenos]{haskell}
-{-# Rules
-   "mapTree/mapTree"   forall f g.   mapTree f . mapTree g    = mapTree (f. g)   ;
-#-}
 \end{minted}
 
 This rule informs GHC of the ability to \textit{fuse} a subsequent tree mapping.
-This rules is considered a form of \textit{deforestation}: 
+This rule is considered a form of \textit{deforestation}: 
 The elimination of intermediate structures \cite{WADLER1990231}.
 
 Sadly however, the effort was in vain: the rule never fired! The reason - as was

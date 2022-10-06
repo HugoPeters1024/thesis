@@ -1,7 +1,10 @@
 \documentclass{report}
 
 \usepackage[utf8]{inputenc}
+\usepackage{textgreek}
 \usepackage{blindtext}
+\usepackage[inference]{semantic}
+\usepackage{multicol}
 \usepackage{hyperref}
 \usepackage[newfloat]{minted}
 \usepackage{amssymb}
@@ -19,8 +22,8 @@
 \definecolor{cverbbg}{gray}{0.93}
 \newcommand{\vtilde}{$\sim\ $}
 
-% \newenvironment{code}{\vspace{0mm}\captionsetup{type=listing}}{\vspace{2mm}}
-\SetupFloatingEnvironment{listing}{name=Code Snippet}
+\newenvironment{equ}{\vspace{0mm}\captionsetup{type=listing}}{\vspace{2mm}}
+% \SetupFloatingEnvironment{listing}{name=Snippet}
 
 \newcommand{\spipe}{\quad\lvert\quad}
 \newcommand{\ctexttt}[1]{\colorbox{cverbbg}{\texttt{#1}}}
@@ -112,7 +115,6 @@
 \newpage
 
 \input{chapters/Introduction.tex}
-
 
 \chapter{Research Questions}
 
@@ -228,8 +230,6 @@ It is also incomplete in the sense that it does not show the process that produc
 artefact.
 
 \paragraph{2. Creating a dump}
-
-
 
 
 % Trying to reach the same conclusion as https://github.com/haskell/text/issues/202 (recursing into the mentioned https://github.com/haskell/text/pull/348)
