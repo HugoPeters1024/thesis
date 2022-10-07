@@ -90,14 +90,16 @@ importance of this transformation pipeline.
 \subsection{Splitting responsibility}
 
 We discussed how GHC is able to make some pretty drastic changes to the source to increase performance.
-Such a transform would conceivably be of type  \hs{HsModule -> HsModule}. However, Haskell is a very rich language
-with many language features, and its AST has dozens of constructors to represent all these possibilities.
-Developing aforementioned transformations on the source would be a particularly strenuous task, not to mention verifying 
-their correctness-preserving property (even empirically). Luckily, upon further inspection it becomes apparent that many
-language features are syntax sugar for - or similarly simple to convert to - other constructors.
+Such a transform would conceivably be of type  \hs{HsModule -> HsModule}.
+However, Haskell is a very rich language with many language features, and its AST 
+has dozens of constructors to represent all these possibilities.
+Developing aforementioned transformations on the source would be a particularly strenuous task, not to mention verifying their correctness-preserving property (even empirically).
+Luckily, upon further inspection it becomes apparent that many language features are syntax 
+sugar for - or similarly simple to convert to - other constructors.
 
-This idea is in fact exploitable to such a great extent, that all Haskell source programs can be projected onto a much
-smaller, but semantically equivalent \textit{core}-language. This leads to a setup with 3 steps with very distinct responsibilities.
+This idea is in fact exploitable to such a great extent, that all Haskell source
+programs can be projected onto a much smaller, but semantically equivalent \textit{core}-language.
+This leads to a setup with 3 steps with very distinct responsibilities.
 
 \begin{itemize}
   \item The frontend parses and typechecks the source and converts it to core. The latter stage is called \textit{desugaring}

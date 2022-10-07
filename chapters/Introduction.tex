@@ -17,8 +17,8 @@ halves = map (`div` 2) . filter even
 
 Both \mono{map} and \mono{filter} are defined as a loop over an input list, producing a new list as output. 
 If code was generated for \mono{halves} in its current form, it would produce two loops as well as allocate
-an intermediate list. Of course, it would be possible to rewrite the function to circumvent this
-issue:
+an intermediate list. This is unnecessary extra work and allocation behavior because
+it would be possible to rewrite the function to circumvent this issue:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -34,31 +34,33 @@ halves_fast (x:xs) =
 \end{listing}
 
 But requiring the programmer to do such rewrites manually tragically undermines
-the virtue of compositional style programming. Code simply would be harder to read, write,
-and maintain and consequently tend to be less correct. 
+the benefits of this compositional style of programming. Code simply would be harder to read, write,
+maintain, and consequently tend to be less correct. 
 
 Luckily, GHC does address this issue - and many others - with an extensive set of optimisation transformations.
 This particular program will benefit greatly from the fusion system which specifically deals with removing
-the intermediate lists. This a well-established optimisation that is also referred to as deforestation. \cite{WADLER1990231}
+the intermediate lists. This is a well-established optimisation that is also referred to as deforestation. \cite{WADLER1990231}
 
-As a result, compiling with these optimisations enabled will result in a syntactically equivalent
-definition for \mono{halves} and \mono{halves_fast}. But how do we check that this actually happened?
+As a result, compiling with these optimisations enabled will result in a \textbf{syntactically} equivalent
+definition for \mono{halves} and \mono{halves_fast}. But how do can we check that this actually happened,
+will continue to happen in the future, and explain what went wrong if it does not?
 
 \section{The cascade effect}
 
 Optimisation transformations are applied is a certain order, giving rise to the \textit{cascade effect}. \cite{haskell_optimisations_1997}
 This effect refers to the dramatic consequences that the order of transformations can have. We will study an example that
-showcases a problematic tug-of-war between two optimisations in-lining and rewrite rules.
+showcases a problematic tug-of-war between two optimisations: (1) inlining and (2) rewrite rules.
 
 \subsection{The inlining transformation}
 
-Inlining is arguably the most important optimisation for any functional language. Surprisingly, it is also on the simplest to implement and comprehend. To understand
-why it is such a staple, we must consider it in conjunction with \textbeta-reduction. Both these
-transformations are formally defined as:
+Inlining is arguably the most important optimisation for any functional language. Coincidentally,
+it is also one of the simplest transformations to implement and comprehend. To reveal
+why it is such a staple, we must consider it in conjunction with \textbeta-reduction. 
+These transformations can formally be defined as:
 
 \begin{multicols}{2}
   \begin{equation}
-    \inference[inline]{(x,t') \in \Gamma \quad \Gamma \vdash t' \triangleright t}{\Gamma \vdash x \triangleright t}
+    \inference[inline]{(x,t) \in \Gamma}{\Gamma \vdash x \triangleright t}
   \end{equation}
   \break
 
@@ -98,7 +100,7 @@ bottom = if True then False else True
 \end{minted}
 \end{listing}
 
-Finally, we evaluate the \mono{if} statement knowing that it always takes the first branch, and
+Finally, we eliminate the \mono{if} statement by evaluation. Knowing that it always takes the first branch, we
 get the final result of:
 
 \begin{listing}[H]
@@ -109,13 +111,13 @@ bottom = True
 
 We can now see that thanks to this transformation duo, we have reduced an expression to a constant
 expression, eliminating any runtime cost. Because the inlining transformation so commonly goes hand
-in hand with \textbeta-reduction we will --- for brevity's sake --- silently assume that reduction also takes
-place after inlining if possible.
+in hand with \textbeta-reduction we will --- for brevity's sake --- from now on presume that \textbeta-reduction,
+wherever relevant, is also applied when we say that an inlining transformation has taken place.
 
-In a sense we were lucky here that the body of the not function reduced so completely. In reality however
+In a sense we were lucky here that the body of the \mono{not} function reduced so completely. But in reality
 it can be the case that function definitions are quite large. While inlining could then still be a good idea,
-it does come at the cost of larger code size. GHC uses a few crude heuristics to help with this decision but
-in practice inlining is almost always worth it. \ref{haskell_optimisations_1997}
+it does come at the cost of larger code sizes. GHC uses a few crude heuristics to help with weighing this trade-off, but
+in practice inlining is almost always worth it. \cite{haskell_optimisations_1997}
 
 
 \subsubsection{Laziness and thunks}
@@ -139,14 +141,15 @@ getAdminPassword user =
 Obviously the \mono{decryptSHA1} is going to be an extremely cost heavy function that under no
 circumstances we wish to be evaluated unless absolutely necessary. Luckily, because Haskell is a
 lazy language the let assignment does not actually evaluate anything; it only allocates a so-called
-\textit{thunk}. Such a thunk represents an expression that is yet to be evaluated. So, because of
-this property this function is actually quite effective at avoiding unnecessary work. 
+\textit{thunk}. Such a thunk represents an expression that is yet to be evaluated. Evaluation is
+in fact deferred to the point where the thunk is actually needed (which is never if the username is
+not \hs{"admin"}). So, because of this property \mono{getAdminPassword} is actually quite effective 
+at avoiding unnecessary work. 
 
-Yet it can still
-be improved upon. Because while the let expression might not do any work it does require an allocation,
-which is not free. But because our let bound variable \mono{decrypted} is used exactly once, we can inline
-it at the use site without running the risk of duplicating the expensive operation. This yields the faster
-definition:
+Yet it can still be improved upon. While the let expression might not do any extra work it does require
+this thunk allocation, which is not free. But because our let bound variable \mono{decrypted} 
+is used exactly once, we can inline it at the only call-site without running the risk of duplicating 
+the expensive operation. This yields the more performant definition:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -157,6 +160,7 @@ getAdminPassword user = case (username user) of
 \end{minted}
 \end{listing}
 
+Inlining --- provided the right conditions exist --- is thus an indispensable optimisation.
 
 \subsection{Rewrite rules}
 
@@ -191,62 +195,135 @@ intermediate structure. \hs{mapTree (+5)} is the far superior equivalent. Howeve
 it has to perform a too complicated and generic analysis. But we can add the rewrite rule \textit{treeMap/treeMap}
 to convince GHC that consecutive applications of \mono{treeMap} are allowed to fuse:
 
-\begin{listing}[H]
 \begin{minted}[linenos]{haskell}
 {-# Rules
    "mapTree/mapTree"   forall f g.   mapTree f . mapTree g    = mapTree (f. g)   ;
 #-}
 \end{minted}
-\end{listing}
 
 But as it turns out, \textit{mapTree/mapTree} never fired for a reason that is not immediately obvious.
 
 \subsection{Tug-of-war}
+\label{section:introduction:tug_of_war}
 
 A common manifestation of the cascade effect is the tug-of-war between inlining and the application
 of rewrite rules. Continuing with the \mono{Tree} example from the previous section, we find that losing this
-tug-of-war is the exact the reason that the \textit{mapTree/mapTree} rule never fired.
-
-A commonly encountered situation where the cascade effect comes into play,
-is the tug-of-war between in-lining functions (replacing a function call with its RHS) and applying rewrite rules. Consider
-the following example of a binary tree,  a function to that facilitates mapping over each \hs{Leaf}, as well a function
-that composes two integer additions over the tree.
+tug-of-war is the exact reason that the \textit{mapTree/mapTree} rule never fired. Because the inlining operation
+was performed first, the left-hand-side of \textit{mapTree/mapTree} no longer occurs in the program and the rule
+is rendered non-active. The final optimised function has regrettably converged to the following form:
 
 \begin{minted}[linenos]{haskell}
-module Tree where
-
-\end{minted}
-
-The \mono{addFive} function is implemented non-optimally; by traversing
-over the tree structure twice, an intermediate structure will be allocated
-and the structure will have to be traversed twice.
-
-To combat this issue, we could add the rewrite rule \textit{mapTree/mapTree}:
-\begin{minted}[linenos]{haskell}
-\end{minted}
-
-This rule informs GHC of the ability to \textit{fuse} a subsequent tree mapping.
-This rule is considered a form of \textit{deforestation}: 
-The elimination of intermediate structures \cite{WADLER1990231}.
-
-Sadly however, the effort was in vain: the rule never fired! The reason - as was
-foreshadowed - is interference with the in-liner. Before our rule is considered, \mono{addFive}
-is transformed by eta expanding and in-lining \mono{(.)} which produces: 
-
-\begin{minted}{haskell}
 addFive :: Tree Int -> Tree Int
-addFive x = mapTree (+1) (mapTree (+4) x)
+addFive = \x -> mapTree (+1) (mapTree (+4) x)
 \end{minted}
 
-But this no longer syntactically matches the LHS of our \mono{mapTree/mapTree} rule. What we have thus shown
-is that we could improve the optimisation pipeline in this specific case by considering our
-rewrite rule before we inline a function. On contrary, it does not take much imagination to
-realise that there will be many other programs for which the opposite holds.
-
-The important point is that one optimisation may open or close the door to many other
-optimisations down the road. It thus becomes clear that the interaction of a Haskell program
+The important point is here is not that rewrite rules are inherently flawed (after all, we could easily
+drum up a secondary rule that does fire here), but that one optimisation
+may open or close the door to many other optimisations down the road.
+From this cascade effect follows that the interaction of a Haskell program
 with the optimiser may be quite unstable and consequently sensitive to small changes. 
 Changes not only in the source but also in the build environment (a minor release of
 the compiler comes to mind). Thus, we cannot trust that our successfully optimised program will remain
 optimised in the future. We observe that each program we write may require specific, manual, 
 effort to be made more efficient.
+
+\subsection{Non-functional requirements: \mono{inspection-testing}}
+\label{section:introduction_inspection_testing}
+
+So if we want our programs to not only be correct but also terminate in reasonable amount of time while
+not consuming an overly large chunk of resources, we have to identify an extra set of contraints. 
+These constraints don't deal with the functionality of the program but rather it's compiled form.
+This collection of additional constraints are examples of \textit{Non-functional} requirements. 
+
+To illustrate with a real world example, the very popular \mono{text} library makes the following promise:
+`\textit{Most of the functions in this module are subject to fusion, meaning that a pipeline of such functions will usually allocate at most one Text value.}'
+\cite{inspection_testing}
+Like with \mono{addFive} in \cref{section:introduction:tug_of_war}, 
+such promises cannot be checked with traditional tests as they do not concern the functionality of the code. 
+
+And as identified by Breitner \cite{inspection_testing}, the aforementioned promise by the \mono{text} library had in fact
+been broken in version \mono{1.2.3.2}, shown by the following counter example:
+
+\begin{minted}[linenos]{haskell}
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.ByteString
+
+countChars :: ByteString -> Int
+countChars = T.length . T.toUpper . TE.decodeUtf8
+\end{minted}
+
+Although \mono{countChars} uses a value of type \mono{Text} during the computations, it does not
+need to be actually constructed in the final composite definition. As we learn from the definition:
+
+\begin{minted}{haskell}
+data Text = Text ByteString Int Int
+\end{minted}
+
+\mono{Text} text is merely a \textit{view} into a \mono{ByteString}
+by virtue of an offset and length parameter. This means that length reducing operations can cleverly avoid the
+costly task of modifying the underlying \mono{ByteString} and instead just change the offset and length parameters.
+Now because UTF-16 contains surrogate pairs, the character length of a \mono{Text} value cannot directly be determined
+from the byte-length its \mono{ByteString} and still requires $O(n)$ time. However, this does not justify constructing
+a concrete \mono{Text} value as opposed to just using the \mono{ByteString} and the offset and length parameters as
+separate bindings. An analogous situation would be a factory with production line workers that
+pack and unpack their intermediate results between every exchange in the assembly line. While they may
+conveniently communicate about receiving a `car door, a bolt, and a nut' unified as their `input', they
+never actually mean to suggest that they receive them packaged together. So too with our \mono{Text} values,
+it is mighty handy to communicate about a package of \mono{ByteString} and two \mono{Int}s, we never intent to
+actually package them at every turn.
+
+But as mentioned, despite the extensive set of rewrite rules that the \mono{text} library has, the
+ideal compilation result was not achieved. In itself this example formed the main motivation to 
+develop a method to tests these non-functional requirements.
+The result is the \mono{inspection-testing} package. 
+It provides the machinery necessary to add the following statement
+directly to the source file, preventing the same regression from occurring in the future.
+
+\begin{minted}{haskell}
+inspect $ 'countChars `hasNoType` ''T.Text
+\end{minted}
+
+Despite preemptively saving us from future regressions, \mono{inspection-testing} does not address the 
+skill and fines required to identify and patch the underlying issue. Consider when the test fails at
+some point, and you are tasked with finding the root of the problem. In this very example the final 
+optimised definition of \mono{countChar} will have undergone many expanding changes producing 
+over 100 lines to painfully sift through without little more ergonomics than a string search. 
+
+It would be possible to get the output at various intermediate moments to identify where the 
+offending \mono{Text} should have been erased, resulting in an extra compilation artifact per transformation.
+Usually this means you have to analyze around 20 different versions of the code. 
+This is a tedious and error prone process, not to mention requires a relatively highly skilled programmer 
+with a solid understanding of the GHC and its optimiser. 
+
+Moreover, we risk having to repeat this work in the future when any small number of changes
+could --- through the cascade effect --- trigger this test as failing again.
+
+\section{Introducing \mono{HsComprehension}}
+
+We intend to address the tediousness and skill required for exploring interactions of specific 
+pieces of Haskell source code with GHC's optimisation pipeline.
+
+We believe that there is an opportunity to improve the way that Haskell programmers reason about
+the performance characteristics of their code while simultaneously appealing to a larger audience
+of less experienced programmers.
+
+This belief stems first of all from the results of the yearly
+Haskell survey where in 2021 only 16\% of respondents either agreed or strongly agreed with the
+statement `\textit{I can easily reason about the performance of my Haskell programs}' \cite{haskell_survey_2021}.
+We are not the only one seeing this statistic as a call to action. As recently the current year,
+Young announced work on a complete Haskell optimisation handbook \cite{optimisation_handbook}.
+A preliminary version of the book already shows that a section on analysing optimisation transformations
+is planned. Although, it is our opinion that a guiding resource --- while certainly extremely helpful ---
+is not a substitute for better tooling.
+
+Secondly, through conversations with Haskell programmers at Well-Typed --- who are also major contributors
+and maintainers of GHC itself -- we learned that it was common practice to create personal tools that
+assisted them in analysing intermediate results of the optimisation transformations during the fairly
+common task of trying to make performance critical sections of programs more efficient. 
+This proves that there is a demand for such tools and that a unified solution does not yet exist.
+
+
+
+
+

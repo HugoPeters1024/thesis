@@ -5,3 +5,8 @@ Haskell is a language explicit about side effects which allows for pretty drasti
 inviting programmers to hand over a lot of optimisation responsibilities. To reasure success one needs to explore
 interactions with the compiler.
 
+Generally we want our programs to not only be correct but also terminate in reasonable amount of time while
+not consuming a overly large chunk of resources. This collection of additional constraints are examples of 
+Non-functional requirements. In trying to meet these requirements, we expect an optimising compiler
+to do some of the heavy lifting. Compositional style programming like in Haskell puts even more
+faith in the compiler in this regard.
