@@ -10,6 +10,7 @@
 \usepackage{amssymb}
 \usepackage{amsmath}
 \usepackage{graphicx}
+\usepackage{svg}
 \usepackage[capitalise]{cleveref}
 \usepackage{enumitem}
 \usepackage{float}
@@ -18,12 +19,13 @@
 \usepackage{fancyvrb, newverbs, xcolor}
 \usepackage{caption}
 \usepackage[UKenglish]{babel}
+\usepackage[parfill]{parskip}
 
 \definecolor{cverbbg}{gray}{0.93}
 \newcommand{\vtilde}{$\sim\ $}
 
 \newenvironment{equ}{\vspace{0mm}\captionsetup{type=listing}}{\vspace{2mm}}
-% \SetupFloatingEnvironment{listing}{name=Snippet}
+\SetupFloatingEnvironment{listing}{name=Code Snippet}
 
 \newcommand{\spipe}{\quad\lvert\quad}
 \newcommand{\ctexttt}[1]{\colorbox{cverbbg}{\texttt{#1}}}
@@ -189,7 +191,7 @@ finally how the compilation pipeline treats these 2.
 
 \section{Diagnosing a failing inspection test}
 
-Hearkening back to \mono{inspection-testing} discussed in \cref{section:background_inspection_testing}, we put
+Hearkening back to \mono{inspection-testing} discussed in \cref{section:introduction_inspection_testing}, we put
 ourselves in the shoes of a programmer who gets surprised by a failing inspection test and reason how she might
 employ HsComprehension to diagnose the problem. She breaks the process down into a number of steps.
 

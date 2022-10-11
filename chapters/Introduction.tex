@@ -160,8 +160,6 @@ getAdminPassword user = case (username user) of
 \end{minted}
 \end{listing}
 
-Inlining --- provided the right conditions exist --- is thus an indispensable optimisation.
-
 \subsection{Rewrite rules}
 
 We've seen how generic program transformation may improve performance. However, GHC can only use relatively
@@ -172,7 +170,7 @@ Programmers can leverage this knowledge by defining so-called \textit{rewrite ru
 substitutions that are not obvious or strictly speaking even correct.  
 
 Consider the binary tree datatype \mono{Tree} with along with a the higher order \mono{mapTree} functions that
-facilities transforming the values contained in the \mono{Leaf}s. We then use \mono{treeMap} to compose two
+facilities transforming the values contained in the \mono{Leaf}s. We then use \mono{mapTree} to compose two
 traversals with an addition in the function \mono{addFive}. Obviously that function is rather contrived as
 an example of something that someone would write, but the pattern may very well show up during the transformation pipeline.
 
@@ -192,8 +190,8 @@ addFive = mapTree (+1) . mapTree (+4)
 
 By now it should be clear why \mono{addFive} is non-optimal; it has a superfluous traversal and allocates an
 intermediate structure. \hs{mapTree (+5)} is the far superior equivalent. However, for GHC to infer this fact
-it has to perform a too complicated and generic analysis. But we can add the rewrite rule \textit{treeMap/treeMap}
-to convince GHC that consecutive applications of \mono{treeMap} are allowed to fuse:
+it has to perform a too complicated and generic analysis. But we can add the rewrite rule \textit{mapTree/mapTree}
+to convince GHC that consecutive applications of \mono{mapTree} are allowed to fuse:
 
 \begin{minted}[linenos]{haskell}
 {-# Rules
@@ -202,6 +200,18 @@ to convince GHC that consecutive applications of \mono{treeMap} are allowed to f
 \end{minted}
 
 But as it turns out, \textit{mapTree/mapTree} never fired for a reason that is not immediately obvious.
+
+\subsubsection{A note on common abstraction}
+
+A clever reader might have noticed that \mono{mapTree} is a perfect candidate for an implementation of \mono{fmap}
+as part of the \mono{Functor} typeclass: 
+
+\begin{minted}[linenos]{haskell}
+instance Functor Tree where
+  fmap = mapTree
+\end{minted}
+
+
 
 \subsection{Tug-of-war}
 \label{section:introduction:tug_of_war}
@@ -308,7 +318,7 @@ We believe that there is an opportunity to improve the way that Haskell programm
 the performance characteristics of their code while simultaneously appealing to a larger audience
 of less experienced programmers.
 
-This belief stems first of all from the results of the yearly
+This belief stems first from the results of the yearly
 Haskell survey where in 2021 only 16\% of respondents either agreed or strongly agreed with the
 statement `\textit{I can easily reason about the performance of my Haskell programs}' \cite{haskell_survey_2021}.
 We are not the only one seeing this statistic as a call to action. As recently the current year,
@@ -320,10 +330,6 @@ is not a substitute for better tooling.
 Secondly, through conversations with Haskell programmers at Well-Typed --- who are also major contributors
 and maintainers of GHC itself -- we learned that it was common practice to create personal tools that
 assisted them in analysing intermediate results of the optimisation transformations during the fairly
-common task of trying to make performance critical sections of programs more efficient. 
+frequent task of trying to make performance critical sections of programs more efficient. 
 This proves that there is a demand for such tools and that a unified solution does not yet exist.
-
-
-
-
 
