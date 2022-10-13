@@ -1,0 +1,44 @@
+\chapter{Methods}
+
+\section{Defining the requirements}
+
+\begin{itemize}
+  \item GHC version agnostic (to where reasonable i.e. 8.4 onwards)
+  \item Simple and non invase steps to create dumps
+  \item Cross platform ability to explore dumps
+  \item Not everything needs to be supported (think unfoldings) but should be extendible in the future
+\end{itemize}
+
+\section{Creating the GHC plugin}
+
+\subsection{Capturing the information}
+All about what GHC encodes in core (IdInfo etc.)
+
+\subsection{Globally unique variables}
+
+It is not strictly necessary for variable names in a program to be unique. A variable name always
+references the nearest binding site. This holds true for Core as well, but is not very convenient
+when we want to analyze a certain variable. After all, naked variables are ambiguous without a given
+environment. We solve this by freshening all duplicate uniques in the entire module after each core2core
+transformation. This gives us the ability to refer to a binding site and its usages unambiguously using simply an integer.
+The big idea here is that any viewing logic no longer needs to deal with binding semantics in any way.
+
+\subsection{Hashing toplevel definitions}
+Full fletched expression comparison is hard, but comparing only toplevel definitions by their hash
+is a manageable compromise that still allows eliminating large chunks of noise.
+
+\section{Creating the frontend application}
+All about ELM, JSON, and why it may be suboptimal
+
+\subsection{Communication}
+Deriving ToJson and Elm code from Haskell types
+
+\subsection{Pretty printing}
+Creating a beginner-friendly core representation
+
+\subsection{Including the source}
+Using python3-pygments to generate highlighted html that can be hacked into the DOM directly
+
+\subsection{Performance considerations}
+Using the lazy html utility for the code pretty printer to ensure interactive
+update times for other DOM changes.

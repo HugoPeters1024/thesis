@@ -1,6 +1,5 @@
 \chapter{Background}
 
-
 \section{A Core Language}
 
 GHC recognises three distinct stages of the compilation process. \cite{haskell_optimisations_1997}
@@ -47,10 +46,11 @@ data Bind
   = NonRec Bndr Expr
   = Rec [(Bndr, Expr)]
   
--- the Id type contains information about
+-- the Var type contains information about
 -- a variable, like it's name, a unique identifier
 -- and analysis results
 type Bndr = Id
+type Id = Var
 
 type Program = [Bind]
 \end{minted}
@@ -58,9 +58,243 @@ type Program = [Bind]
 \caption{An ever so slightly simplified version of the Core Language}
 \end{listing}
 
-Writing an optimisation transformation essentially of type \hs{Program -> Program} does not now seem
+Writing an optimisation transformation essentially of type \hs{Program \rightarrow Program} does not now seem
 as daunting given the drastically reduced number of cases to consider. 
 Likewise, maintaining and debugging transformations is much less of a strenuous task.
+
+\section{The core2core transformations}
+
+Over its numerous decades of development, the core2core pipeline has been fitted with a myriad of transformations.
+It would be impractical to discuss all them here. However, we will discuss in depth the role of the four 5 simplifier
+passes, as well as the worker/wrapper transformation. The first because it gives context to the rewrite rules and the latter
+because it is a natural bridge to unboxed types; both concepts which will become relevant in discussing the results of this thesis.
+
+\subsection{The simplifier: its parts}
+
+The simplifier is quite literally an indispensable part of the transformation pipeline. Although the parts of the pipeline
+are meant to be seperable entities, they heavily rely on the simplifier to deal with the cleanup. As such, it has earned
+itself the reputation of being the workhorse of the pipeline. \cite{ghc_wiki}
+
+If you were looking for an atom, you have not found it. The simplifier is in itself again a collection of smaller transformations,
+albeit applied concurrently. Each simplifier subpart is a local transformation, that is, it only looks at the immediate
+surroundings of the expression. We give a near comprehensive list of each subpart along with an example:
+
+\subsubsection{Constant Folding}
+Evaluate expressions that require no runtime information. This is a very logical transformation that does not
+require any considerations.
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+-- before
+3 + 4
+-- after
+7
+\end{minted}
+\end{listing}
+
+\subsubsection{Inlining-1}
+
+Inlining function calls is a well known performance enhancing operation in all language, but especially so in functional ones.
+The difference is staggering with a around 10-15\% performance increase for conventional languages, as opposed to
+30-40\% for functional languages. \cite{haskell_optimisations_1997} \cite{c_inliner}.
+
+Unlike constant folding, it is not an ad-hoc no brainer. An easy case would be to inline a function that is
+used exactly once. All that this does is remove the veil that hides the function body for further optimisations:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+-- before
+f x = x + 1
+f 3
+-- after
+3 + 1
+\end{minted}
+\end{listing}
+
+However, if the function is used in multiple locations with different arguments, you risk increasing the size of the program
+because the function body will be duplicated at each call-site. This is a trade-off that --- altough often worth it --- must be
+considered on a case to case basis. GHC has a number of heuristics to determine whether inlining is worth it or not. Obviously,
+this cannot be a perfect solution and one can imagine how a small change in the code can suddenly cause the inliner to reverse
+its decision; a testament to the non-continuous nature of the compiler.
+
+\subsubsection{Inlining-2}
+
+Let bindings are often described as syntax sugar for lambda abstractions, there is an important difference to be considered.
+Because let bindings in Haskell are lazily evaluated, it may lead to explosion if the let bound variable is used in a lambda
+expression. For example:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+-- before, 'expensive' is called at most once
+let v = expensive 42
+    l x = ... v ...
+in map xs
+
+-- after, 'expensive' is called for each element of 'xs'
+let l x = ... expensive 42 ...
+in map xs
+\end{minted}
+\end{listing}
+
+This transformation would be disastrous for performance and GHC will take greate care to avoid it. 
+
+\subsubsection{Case of known constructor}
+
+The case destruction is only the way to get to the WHNF of an expression. This means that inside of a case expression
+we have learned information about the variable under scrutiny and can use it to infer the result of outer case expressions.
+Consider the following scenario:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+safe_tail :: [a] -> [a]
+safe_tail list = case list of
+  [] -> []
+  x:xs -> tail list
+\end{minted}
+\end{listing}
+
+Which inlining will transform into:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+safe_tail :: [a] -> [a]
+safe_tail list = case list of
+  [] -> []
+  x:xs -> case xs of
+    [] -> error "tail of empty list"
+    (x:xs) -> xs
+\end{minted}
+\end{listing}
+
+Since we scrutinize \mono{xs} again in the inner case, we actually already know that the second case is only ever called,
+thus we can eliminate the case expression as a whole.
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+safe_tail :: [a] -> [a]
+safe_tail list = case list of
+  [] -> []
+  x:xs -> xs
+\end{minted}
+\end{listing}
+
+The removal of the call \mono{error} is a testament to this function being deserving of the \mono{safe} prefix.
+
+\subsubsection{Case of case}
+
+There are cases (no pun intended) where the case-of-know-constructor cannot quite do its job, although it is obvious
+that benefits are still to be gained. Consider for example what happens when instead of scrutinizing the same variable,
+the outer case scrutinizes the result of the innner case:
+
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+-- before (possibly desugared from 'if (not x) then E1 else E2'
+-- after also inlining 'not')
+case (case x of {True -> False; False -> True}) of
+  True -> E1
+  False -> E2
+\end{minted}
+\end{listing}
+
+We might hope to gain something from the information that the inner case has produced by moving the outer case expression
+to each branch of the inner one:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+case x of
+  True -> case False of {True -> E1; False -> E2}
+  False -> case True of {True -> E1; False -> E2}
+\end{minted}
+\end{listing}
+
+Now we can rely on constant folding to simplify all the way down to:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+case x of
+  True -> E2
+  False -> E1
+\end{minted}
+\end{listing}
+
+Note that we do risk duplicating \mono{E1} and \mono{E2} if the expression does not reduce so completely.
+A solution to this are \textit{join points}, which we will not go into here for the sake of brevity.
+
+\subsubsection{Rewrite rules}
+
+We already discussed in \cref{section:introduction:rewrite_rules} how rewrite rules are way to express domain
+specific knowledge to the compiler that it otherwise can't practically infer. Applying given rewrite rules is task
+also given to the simplifier. It should now be clear that this process can get a little messy since the simplifier
+is under no obligation to apply the rules, nor its other tasks, in any particular order. We will get into this issue
+more in the next section where we discuss the simplifier at large.
+
+It should be noted that the use of rewrite rules are very common during the compilation of most any haskell program.
+This is because the internal fusion system on list operations are implemented as built in rewrite rules.
+We discuss this system more in depth in \cref{section:background:fusion}.
+
+
+
+\subsection{The simplifier: its sum}
+
+An attentive reader might have noticed that when explaining one part of the simplifier, we often relied on another to
+its job. This begs the question: how does the simplifier determine in which order to run its subparts. The answer to that is
+that it does not. The analogy here is that a compiler is a gun and a program is a target. Every program is very different
+and we cannot know in advance how to best hit it. Therefore, we must ensure that the compiler --- or this case the simplifier stage ---
+has a lot of bullets in its gun to ensure being able to effectively hit a lot of targets. \cite{haskell_optimisations_1997}
+
+A secondary problem with this approach is that one simplifier part may enable another to its job after. Running the simplifier
+once is therefore not satisfactory and we must run it until it reaches a sort of \textit{fixed point}. At least up until some
+arbitrary limit since there is no guarantee such a fixed point exists and even if it does that we find it and not get stuck in a loop.
+
+Aforementioned looping beheavior can actually occur quite easily due to certain rewrite rules. It is not always the case that
+the RHS of a rewrite rules objectively better than the right. It might be that the rewrite is benificial because it \textbf{may}
+enable other optimisation to take place afterwards. However, if for some reason that did not turn out to be possible, we may want
+to apply the reverse rewrite rule later. This is obviously problematic as we can be ping-pong between rewrite rules forever.
+To overcome that issue one can enable/disable rewrites rules in certain phases of simplifier. To understand this we must first
+understand when the simplifier is run.
+
+In order, the simplifier is --- rather unituitively --- interspersed between other transformations as follows:
+
+\begin{enumerate}
+  \item \textbf{Gentle} (disables case-of-case transformations)
+  \item \textbf{Phase 2}
+  \item \textbf{Phase 1}
+  \item \textbf{Phase 0}
+  \item \textbf{Final}
+\end{enumerate}
+
+By default, rewrite rules as well as inlinings can occur in each of these phases but the programmer does have to ability
+to specify devations from this beheavior. For example, in the \mono{text} library, we find in the \mono{Data.Text} module
+the following snippet:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+-- This function gives the same answer as comparing against the result
+-- of 'length', but can short circuit if the count of characters is
+-- greater than the number, and hence be more efficient.
+compareLength :: Text -> Int -> Ordering
+compareLength t c = S.compareLengthI (stream t) c
+{-# INLINE [1] compareLength #-}
+
+{-# RULES
+"TEXT compareN/length -> compareLength" [~1] forall t n.
+    compare (length t) n = compareLength t n
+#-}
+\end{minted}
+\end{listing}
+
+Here phase control is used to indicate that \mono{compareLength} should \textbf{only} be inlined in phase 1 and conversely
+that the rewrite rule \textbf{compareN/length} maybe applied \textbf{except} in phase 1. What this ensures is that the inliner
+will not operate on the result of the rewrite rule directly in the same phase. This is supposedly because we expect \mono{compareLength}
+to occur in the LHS of a different rewrite rule which is to be desired over inlining at first.
+
+\subsection{The worker/wrapper transformation}
+
+\section{The fusion system}
+\label{section:background:fusion}
+
+build/fold using rewrite rules
 
 \section{Contemporary Haskell comprehension}
 
@@ -89,6 +323,7 @@ a steep barrier to entry.
 \subsection{Current tooling}
 
 \subsubsection{GHC itself}
+
 
 Core snippets of your program can easily be coerced out of GHC. The most information you can get
 is the Core AST at each pass of the optimisation pipeline by using \mono{-ddump-core2core}.
@@ -216,7 +451,7 @@ quicksort
 The same desugared Core representation with the \mono{-dsuppress-all} flag:
 
 \begin{listing}[H]
-\begin{minted}[linenos]{haskell}
+\begin{minted}[linenos,fontsize=\footnotesize]{haskell}
 -- RHS size: {terms: 55, types: 47, coercions: 0, joins: 0/10}
 quicksort
   = \ @ a_a1pH $dOrd_a1pJ ->
@@ -256,6 +491,12 @@ quicksort
 \end{minted}
 \label{code:quicksort_core_dsuppress}
 \end{listing}
+
+A drastic improvement for sure, but there are still some things to be left desired.
+A simpler language like Core generally needs more code to express the same thing, we can thus expect
+to generate more data than the original Haskell code. Moreover, should you be interested the state off
+the program at each of the intermediate steps, you can expect to see about 20x more data still.
+Unless you know exactly what to search for, this begs for a more ergonomic, filtered view of the data.
 
 \subsubsection{GHC Plugins}
 
