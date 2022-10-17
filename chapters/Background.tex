@@ -73,7 +73,7 @@ because it is a natural bridge to unboxed types; both concepts which will become
 
 The simplifier is quite literally an indispensable part of the transformation pipeline. Although the parts of the pipeline
 are meant to be seperable entities, they heavily rely on the simplifier to deal with the cleanup. As such, it has earned
-itself the reputation of being the workhorse of the pipeline. \cite{ghc_wiki}
+itself the reputation of being the workhorse of the pipeline. \cite{ghc_wiki_core2core}
 
 If you were looking for an atom, you have not found it. The simplifier is in itself again a collection of smaller transformations,
 albeit applied concurrently. Each simplifier subpart is a local transformation, that is, it only looks at the immediate
@@ -254,7 +254,7 @@ to apply the reverse rewrite rule later. This is obviously problematic as we can
 To overcome that issue one can enable/disable rewrites rules in certain phases of simplifier. To understand this we must first
 understand when the simplifier is run.
 
-In order, the simplifier is --- rather unituitively --- interspersed between other transformations as follows:
+In order, the simplifier is --- rather unintuitively --- interspersed between other transformations as follows:
 
 \begin{enumerate}
   \item \textbf{Gentle} (disables case-of-case transformations)
@@ -285,11 +285,118 @@ compareLength t c = S.compareLengthI (stream t) c
 \end{listing}
 
 Here phase control is used to indicate that \mono{compareLength} should \textbf{only} be inlined in phase 1 and conversely
-that the rewrite rule \textbf{compareN/length} maybe applied \textbf{except} in phase 1. What this ensures is that the inliner
+that the rewrite rule \textbf{compareN/length} may be applied \textbf{except} in phase 1. What this ensures is that the inliner
 will not operate on the result of the rewrite rule directly in the same phase. This is supposedly because we expect \mono{compareLength}
 to occur in the LHS of a different rewrite rule which is to be desired over inlining at first.
 
 \subsection{The worker/wrapper transformation}
+
+The \textit{worker/wrapper} transformation is able to change the type of computation (typically a loop) into a \textit{worker}
+along with a \textit{wrapper} that can convert back to the original type. The example listed on the GHC wiki is that of the reverse
+function on lists \cite{ghc_wiki_wwrapper}. One might concisely define with direct recursion and the \mono{++} operator:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+reverse :: [a] -> [a]
+reverse [] = []
+reverse (x:xs) = reverse xs ++ [x]
+\end{minted}
+\end{listing}
+
+Of course this is not very efficient as the \mono{++} operator itself is already linear, make the reverse function quadratic; If we
+create an auxiliary \textbf{worker} function \mono{reverse'} that takes an extra accumulator argument, we can create a linear version:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+reverse :: [a] -> [a]
+reverse = reverse' []
+  where reverse' acc [] = acc
+        reverse' acc (x:xs) = reverse' (x:acc) xs
+\end{minted}
+\end{listing}
+
+Here the \textbf{wrapper} is simply applying the empty list as a starting argument to the function. Thus, by introducing some state
+that exists only during the lifetime of the computation, the function has become asymptotically more efficient.
+
+Impressively, the transformation may also greatly improve the constant factor of the runtime by leveraging unboxed types.
+Unlike strict languages, the \mono{Int} type in Haskell --- while always representing a 64 bit integer --- is not statically sized.
+After all, any value is lazy and may therefore still be unevaluated thunk whose size is unknown at compile time. As a result, \mono{Int}s
+are always stored on the heap and thus require runtime allocation. However, \mono{Int} has a strict counterpart \mono{Int#} (unboxed integer)
+in which it is defined: \hs{data Int = Int Int#}. Computations on \mono{Int#}s can be evaluated much more cheaply since such values can be
+stored on the stack.
+
+Knowing this, we can opt to employ the worker/wrapper transformation not add state to the worker, but change the types to their unboxed counterparts.
+Naturally the wrapper operation is then simply the constructor of the lazy type. Let us consider the example of the recursive \mono{triangular} function which
+given a number \mono{n} returns the sum of all numbers from 1 to \mono{n}:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+triangular :: Int -> Int
+triangular 0 = 0
+triangular n = n + triangular (n-1)
+\end{minted}
+\end{listing}
+
+Although an all knowing compiler could have determined that the result of \mono{triangular} can simply be calculated numerically in constant time as \mono{n * (n+1) / 2},
+we can still trust that GHC to remove the need for an allocation at each recursive call:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+wtriangular :: Int# -> Int#
+wtriangular ww = case ww of
+  { 0 -> 0
+    ds -> case wtriangular
+                 (GHC.Prim.-# ds 1) of
+      { ww -> GHC.Prim.+# ds ww
+      }
+  }
+
+triangular :: Int -> Int
+triangular w = case w of
+  { I# ww -> case wtriangular ww of
+      { ww -> GHC.Types.I# ww
+      }
+  }
+\end{minted}
+\end{listing}
+
+To get a feeling for the difference in performance, we can compare the runtime of the original function with the worker/wrapper version:
+
+\begin{table}[H]
+\begin{tabular}{|l|l|}
+\textbf{Snippet} & \textbf{Result of \mono{time}}\\
+\hline \\
+\mono{original} & 0,10s user 0,03s system 99\% cpu 0,132 total \\
+\mono{transformed} & 0,01s user 0,01s system 98\% cpu 0,023 total \\
+\end{tabular}
+\caption{The runtime of each listing. We can see that the optimisation has increased runtime performance by a significant factor.}
+\end{table}
+
+It might not be immediately intuitive why the performance differs so drastically and where exactly these seemingly evil allocation occur.
+The ridiculousness of the original function becomes apparent when we consider a C implementation with the same allocation behavior:
+
+\begin{minted}[linenos]{c}
+#include <stdio.h>
+#include <stdlib.h>
+
+// utility function for heap allocation a 64 bit integer
+long* alloc_long() { return (long*)malloc(sizeof(long)); }
+
+long* triangular(const long* n_ptr) {
+  long* ret = alloc_long();
+  // derefence the pointer into a value
+  long n = *n_ptr;
+  if (n==0) { *ret = 0; } else {
+    // allocate a new pointer with which to call the function recursively
+    long* inp_ptr = alloc_long();
+    *inp_ptr = n-1 ;
+    *ret = n + *triangular(inp_ptr);
+  }
+  return ret;
+}
+\end{minted}
+
+Rest assured that any C programmer suggesting this implementation would get some weird looks.
 
 \section{The fusion system}
 \label{section:background:fusion}
@@ -313,11 +420,11 @@ The worst offender is byteStringHex, which on my machine runs about 10 times slo
 as it did when using ghc-9.2.3. Here's a small program that can demonstrate this slowdown:}
 \hfill \break
 
-It then provides two snippets containing the final Core representation of \mono{byteStringHex} as produced by the two different GHC version.
-Each of these documents are around 400 lines of un-highlighted code with all available information. And while having all available information
+The author then provides two snippets containing the final Core representation of \mono{byteStringHex} as produced by the two different GHC version.
+Each of these documents contain around 400 lines of unhighlighted code annotated with all available information. And while having all available information
 sounds like a good thing (and it is in a way) it poses a serious practicality issue.
 Namely: it is exceedingly difficult for a human to read and comprehend a certain aspect of the AST while having to filter out another.
-Not to mention, it solidifies reading Core as an activity reserved for only the most expert Haskell developers by, scaring others away with
+Not to mention, it solidifies reading Core as an activity reserved for only the most expert Haskell developers by scaring others away with
 a steep barrier to entry.
 
 \subsection{Current tooling}
