@@ -1,40 +1,143 @@
 \chapter{Methods}
 
-\section{Defining the requirements}
+\section{Requirements and architecture}
 
 \begin{itemize}
   \item GHC version agnostic (to where reasonable i.e. 8.4 onwards)
   \item Simple and non invase steps to create dumps
-  \item Cross platform ability to explore dumps
+  \item Cross-platform ability to explore dumps
   \item Not everything needs to be supported (think unfoldings) but should be extendible in the future
 \end{itemize}
 
+We envisioned a high degree of interactability with the snapshots of the intermediate ASTs. To realise this
+in a cross-platform fashion, we decided to use a browser based frontend application. Because the concept of
+mutually recursive algebraic datatypes are very pervasive in the Core AST, we felt it would be helpful
+if the frontend language had first class support for this. This naturally led to us to Elm, a functional language
+that compiles to Javscript \cite{elm_lang}.
+
 \section{Creating the GHC plugin}
 
+By far the most logical and convenient method for obtaining all the available information in the AST it to capture
+it directly using a GHC core2core plugin that intersperses each transformation with an identity transformation that
+saves a JSON representation of the AST to a file as a side effect. 
+
 \subsection{Capturing the information}
-All about what GHC encodes in core (IdInfo etc.)
+
+If we wish to support multiple recent versions of GHC we need to deal with the fact that the Core ADT has undergone
+a few minor changes and additions. We believe that the solution is to create some auxiliary definition to which we can
+map various versions of the Core ADT. This was done very efficiently by building upon the existing \mono{ghc-dump} package,
+which already implemented such an ADT as well as a version agnostic conversion module with the help of \mono{min_version_GHC}
+macro statements \cite{ghc_dump}. 
+
+What \mono{ghc-dump} also intelligently addresses, is the issue of possible infinite recursion
+in the Core AST through the \mono{CoreExpr} inside the unfolding of a \mono{CoreBndr}. If we demote each
+call site to a simple identifier, we obtain a finite representation that we can later reconstruct by traversing
+the AST with an environment.
 
 \subsection{Globally unique variables}
 
 It is not strictly necessary for variable names in a program to be unique. A variable name always
 references the nearest binding site. This holds true for Core as well, but is not very convenient
-when we want to analyze a certain variable. After all, naked variables are ambiguous without a given
-environment. We solve this by freshening all duplicate uniques in the entire module after each core2core
-transformation. This gives us the ability to refer to a binding site and its usages unambiguously using simply an integer.
-The big idea here is that any viewing logic no longer needs to deal with binding semantics in any way.
+when we want to analyze a certain variable in isolation. After all, naked variables are ambiguous without a given
+environment. Consider the definition of tail:
 
-\subsection{Hashing toplevel definitions}
-Full fletched expression comparison is hard, but comparing only toplevel definitions by their hash
-is a manageable compromise that still allows eliminating large chunks of noise.
+\begin{listing}[H]
+\begin{minted}{haskell}
+tail xs = case xs of
+  x:xs -> xs
+  _    -> error "tail of empty list"
+\end{minted}
+\end{listing}
+
+We cannot simply refer to the variable \mono{xs} as that name has two different binding sites.
+We solve this by running a \textit{uniqify} pass before each snapshot that freshens all duplicate uniques in the entire
+module after each core2core transformation. This gives us the ability to refer to a binding site and its usages unambiguously using simply an integer.
+The big idea here is that any viewing logic is completely decoupled from binding semantics:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+tail xs_0 = case xs_0 of
+  x_1:xs_2 -> xs_2
+  _        -> error "tail of empty list"
+\end{minted}
+\end{listing}
+
+It is possible to omit the numbered suffixes when displaying the AST, but internally it is very useful to be able to make
+this distinction without any further effort.
+
+\subsection{Detecting changes}
+
+If a module is of a slightly larger size, it becomes difficult to spot the changes made by a certain
+transformation, if there even are any. To address this, we decided to develop a feature that allows for
+the filtering of code that remains unchanged. Let us define what unchanged means in this context. It is
+important to make the subtle distinction between syntactic equivalence and $\alpha$-equivalence. The difference
+is that the latter is agnostic to the names of variables, as long as they refer to the same binding site.
+
+We can quickly solve the decision problem of syntactic equality by calculating a hash of an expression beforehand
+and simply checking for equality of this hash value. We considered using recent improvements of full sub expression
+matching \cite{hashing_mod_alpha}, but decided against it as it was not clear how to effectively present the results
+nor did it rarely prove useful to isolate changes in the AST as they were rarely local to begin with.
+Instead, we opted for a far simpler approach where we only hash the toplevel functions, and provide a more crude
+option to hide any toplevel definitions that have not changed at all.
+
+All in all, we still recommend that issues are attempted to be reproduced in small modules as the amount of
+noise can quickly become overwhelming despite change detection.
 
 \section{Creating the frontend application}
-All about ELM, JSON, and why it may be suboptimal
 
-\subsection{Communication}
-Deriving ToJson and Elm code from Haskell types
+\subsection{Reproducing the AST}
+It would have been extremely tedious to have to constantly maintain a Core ADT in Elm along with a JSON
+parser that is compatible with the JSON output of the Haskell plugin. Luckily, we were able to use the
+\mono{haskell-to-elm} \cite{haskell_to_elm} package to automatically derive all the needed boilerplate code.
+
+For example the \mono{Alt} datatype (i.e. an arm of a case expression) is defined as follows in Haskell:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+data Alt = Alt
+    { altCon :: AltCon
+    , altBinders :: [Binder]
+    , altRHS :: Expr
+    }
+    deriving (Generic)
+\end{minted}
+\end{listing}
+
+The corresponding, autogenerated, Elm definition becomes:
+
+\begin{listing}[H]
+\begin{minted}{elm}
+type alias Alt =
+    { altCon : AltCon
+    , altBinders : List Binder
+    , altRHS : Expr
+    }
+
+altDecoder : Json.Decode.Decoder Alt
+altDecoder =
+    Json.Decode.succeed Alt |>
+    Json.Decode.Pipeline.required "altCon" altConDecoder |>
+    Json.Decode.Pipeline.required "altBinders" (Json.Decode.list binderDecoder) |>
+    Json.Decode.Pipeline.required "altRHS" exprDecoder
+\end{minted}
+\end{listing}
+
+Conviently, it would be very easy in the future to extend the Haskell ADT with additional information
+because it is the single source of truth; The Elm ADT and JSON machinery can then be regenerated with a single command.
 
 \subsection{Pretty printing}
-Creating a beginner-friendly core representation
+
+It certainly should be considered useful to display the Core in exactly the same way that
+GHC does. After all, this is what programmers are currently already used to and its design
+has been given a lot of thought. However, we felt a need to first create a separate representation
+that is tailored to those who have not seen Core before.
+
+Haskell programmers that care enough to look at the interaction with the compiler are likely to be
+avid readers of at least basic Haskell syntax. Therefore we decided to create a pretty printer that attempts
+to be as similar to Haskell source as possible. Just like GHC, we used pretty printing the method developed 
+by Waddler \cite{prettier_printer}, implemented in Elm using \mono{elm-pretty-printer} \cite{prettier_printer_elm}.
+
+
 
 \subsection{Including the source}
 Using python3-pygments to generate highlighted html that can be hacked into the DOM directly
@@ -42,3 +145,4 @@ Using python3-pygments to generate highlighted html that can be hacked into the 
 \subsection{Performance considerations}
 Using the lazy html utility for the code pretty printer to ensure interactive
 update times for other DOM changes.
+

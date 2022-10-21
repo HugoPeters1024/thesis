@@ -1,10 +1,10 @@
 \chapter{Background}
 
 \section{A Core Language}
+\label{section:background:core_lang}
 
-GHC recognises three distinct stages of the compilation process. \cite{haskell_optimisations_1997}
+GHC recognises three distinct stages of the compilation process \cite{haskell_optimisations_1997}.
 
-% A latex list with frontend, middle, backend
 \begin{enumerate}
   \item \textbf{Frontend}, parsing and type checking, enables to give clear errors that reference the unaltered source code.
   \item \textbf{Middle}, a number of optimisation transformations.
@@ -12,13 +12,13 @@ GHC recognises three distinct stages of the compilation process. \cite{haskell_o
 \end{enumerate}
 
 The middle section is tasked with doing all the optimisation work it can, leaving only those optimisations to the backend
-it can't otherwise perform. Within the middle section, the work is further split into sub-stages, where each transformation
+it can not otherwise perform. Within the middle section, the work is further split into substages, where each transformation
 is a separate, composable pass. An obvious benefit to this approach is that each pass can be tested independently. Moreover, because
-the types are preserved throughout the middle section, it can be verified that each transformation does not violate the typesystem;
-A strong bit of evidence towards the correctness of the compiler.
+the types are preserved throughout the middle section, it can be verified that each transformation preserves type correctness;
+Providing some evidence towards the correctness of the transformation.
 
-Regardless, the Haskell source language itself is not a good target for optimisation transformations. The source language wants
-to be rich and expressive, which yields a datatype of over 100 constructors. Any transformation over such a datatype has far too
+Regardless, the Haskell source language itself is not a good target for optimisation. The source has to be
+rich and expressive, which yields a datatype of over 100 constructors. Any transformation over such a datatype has far too
 many cases to be considered practical to implement; Not to mention the myriad of bug-inducing edge cases. To overcome this issue, the
 middle section first performs a desugaring pass, translating the source language into a far simpler intermediate language
 called \textit{Core}. 
@@ -58,30 +58,31 @@ type Program = [Bind]
 \caption{An ever so slightly simplified version of the Core Language}
 \end{listing}
 
-Writing an optimisation transformation essentially of type \hs{Program \rightarrow Program} does not now seem
-as daunting given the drastically reduced number of cases to consider. 
+Writing an optimisation transformation essentially of type \hs{Program -> Program} does not now seem
+as daunting, given the drastically reduced number of cases to consider. 
 Likewise, maintaining and debugging transformations is much less of a strenuous task.
 
 \section{The core2core transformations}
 
 Over its numerous decades of development, the core2core pipeline has been fitted with a myriad of transformations.
-It would be impractical to discuss all them here. However, we will discuss in depth the role of the four 5 simplifier
+It would be impractical to discuss all of them here. However, we will discuss in depth the role of the multiple simplifier
 passes, as well as the worker/wrapper transformation. The first because it gives context to the rewrite rules and the latter
 because it is a natural bridge to unboxed types; both concepts which will become relevant in discussing the results of this thesis.
+Lastly, we zoom in on the analysis results stored in the \mono{Var} type.
 
 \subsection{The simplifier: its parts}
 
 The simplifier is quite literally an indispensable part of the transformation pipeline. Although the parts of the pipeline
-are meant to be seperable entities, they heavily rely on the simplifier to deal with the cleanup. As such, it has earned
-itself the reputation of being the workhorse of the pipeline. \cite{ghc_wiki_core2core}
+are meant to be separable entities, they heavily rely on the simplifier to deal with the cleanup. As such, it has earned
+itself the reputation of being the workhorse of the pipeline \cite{ghc_wiki_core2core}.
 
 If you were looking for an atom, you have not found it. The simplifier is in itself again a collection of smaller transformations,
-albeit applied concurrently. Each simplifier subpart is a local transformation, that is, it only looks at the immediate
-surroundings of the expression. We give a near comprehensive list of each subpart along with an example:
+albeit applied repeatedly and interleaved such that they cannot be easily untangled. Each simplifier subpart is a local transformation,
+that is, it only looks at the immediate surroundings of the expression. We give a near comprehensive list of each subpart along with an example:
 
 \subsubsection{Constant Folding}
 Evaluate expressions that require no runtime information. This is a very logical transformation that does not
-require any considerations.
+require any further considerations.
 
 \begin{listing}[H]
 \begin{minted}{haskell}
@@ -96,9 +97,9 @@ require any considerations.
 
 Inlining function calls is a well known performance enhancing operation in all language, but especially so in functional ones.
 The difference is staggering with a around 10-15\% performance increase for conventional languages, as opposed to
-30-40\% for functional languages. \cite{haskell_optimisations_1997} \cite{c_inliner}.
+30-40\% for functional languages \cite{haskell_optimisations_1997}.
 
-Unlike constant folding, it is not an ad-hoc no brainer. An easy case would be to inline a function that is
+Unlike constant folding, it is not an ad-hoc no-brainer. An easy case would be to inline a function that is
 used exactly once. All that this does is remove the veil that hides the function body for further optimisations:
 
 \begin{listing}[H]
@@ -112,12 +113,13 @@ f 3
 \end{listing}
 
 However, if the function is used in multiple locations with different arguments, you risk increasing the size of the program
-because the function body will be duplicated at each call-site. This is a trade-off that --- altough often worth it --- must be
+because the function body will be duplicated at each call-site. This is a trade-off that --- although often worth it --- must be
 considered on a case to case basis. GHC has a number of heuristics to determine whether inlining is worth it or not. Obviously,
 this cannot be a perfect solution and one can imagine how a small change in the code can suddenly cause the inliner to reverse
 its decision; a testament to the non-continuous nature of the compiler.
 
 \subsubsection{Inlining-2}
+\label{section:background:inlining2}
 
 Let bindings are often described as syntax sugar for lambda abstractions, there is an important difference to be considered.
 Because let bindings in Haskell are lazily evaluated, it may lead to explosion if the let bound variable is used in a lambda
@@ -136,7 +138,7 @@ in map xs
 \end{minted}
 \end{listing}
 
-This transformation would be disastrous for performance and GHC will take greate care to avoid it. 
+In this case, inlining would be disastrous for performance and GHC will take great care to avoid it. 
 
 \subsubsection{Case of known constructor}
 
@@ -147,9 +149,9 @@ Consider the following scenario:
 \begin{listing}[H]
 \begin{minted}{haskell}
 safe_tail :: [a] -> [a]
-safe_tail list = case list of
-  [] -> []
-  x:xs -> tail list
+safe_tail ls = case ls of
+    [] -> []
+    x:xs -> tail ls
 \end{minted}
 \end{listing}
 
@@ -158,11 +160,11 @@ Which inlining will transform into:
 \begin{listing}[H]
 \begin{minted}{haskell}
 safe_tail :: [a] -> [a]
-safe_tail list = case list of
-  [] -> []
-  x:xs -> case xs of
-    [] -> error "tail of empty list"
-    (x:xs) -> xs
+safe_tail ls = case ls of
+    [] -> []
+    x:xs -> case xs of
+        [] -> error "tail of empty list"
+        (x:xs) -> xs
 \end{minted}
 \end{listing}
 
@@ -172,9 +174,9 @@ thus we can eliminate the case expression as a whole.
 \begin{listing}[H]
 \begin{minted}{haskell}
 safe_tail :: [a] -> [a]
-safe_tail list = case list of
-  [] -> []
-  x:xs -> xs
+safe_tail ls = case ls of
+    []   -> []
+    x:xs -> xs
 \end{minted}
 \end{listing}
 
@@ -192,8 +194,8 @@ the outer case scrutinizes the result of the innner case:
 -- before (possibly desugared from 'if (not x) then E1 else E2'
 -- after also inlining 'not')
 case (case x of {True -> False; False -> True}) of
-  True -> E1
-  False -> E2
+    True -> E1
+    False -> E2
 \end{minted}
 \end{listing}
 
@@ -203,8 +205,8 @@ to each branch of the inner one:
 \begin{listing}[H]
 \begin{minted}{haskell}
 case x of
-  True -> case False of {True -> E1; False -> E2}
-  False -> case True of {True -> E1; False -> E2}
+    True -> case False of {True -> E1; False -> E2}
+    False -> case True of {True -> E1; False -> E2}
 \end{minted}
 \end{listing}
 
@@ -213,8 +215,8 @@ Now we can rely on constant folding to simplify all the way down to:
 \begin{listing}[H]
 \begin{minted}{haskell}
 case x of
-  True -> E2
-  False -> E1
+    True -> E2
+    False -> E1
 \end{minted}
 \end{listing}
 
@@ -224,12 +226,12 @@ A solution to this are \textit{join points}, which we will not go into here for 
 \subsubsection{Rewrite rules}
 
 We already discussed in \cref{section:introduction:rewrite_rules} how rewrite rules are way to express domain
-specific knowledge to the compiler that it otherwise can't practically infer. Applying given rewrite rules is task
+specific knowledge to the compiler that it otherwise can not practically infer. Applying given rewrite rules is task
 also given to the simplifier. It should now be clear that this process can get a little messy since the simplifier
 is under no obligation to apply the rules, nor its other tasks, in any particular order. We will get into this issue
 more in the next section where we discuss the simplifier at large.
 
-It should be noted that the use of rewrite rules are very common during the compilation of most any haskell program.
+It should be noted that the use of rewrite rules are very common during the compilation of most any Haskell program.
 This is because the internal fusion system on list operations are implemented as built in rewrite rules.
 We discuss this system more in depth in \cref{section:background:fusion}.
 
@@ -241,7 +243,7 @@ An attentive reader might have noticed that when explaining one part of the simp
 its job. This begs the question: how does the simplifier determine in which order to run its subparts. The answer to that is
 that it does not. The analogy here is that a compiler is a gun and a program is a target. Every program is very different
 and we cannot know in advance how to best hit it. Therefore, we must ensure that the compiler --- or this case the simplifier stage ---
-has a lot of bullets in its gun to ensure being able to effectively hit a lot of targets. \cite{haskell_optimisations_1997}
+has a lot of bullets in its gun to ensure being able to effectively hit a lot of targets \cite{haskell_optimisations_1997}.
 
 A secondary problem with this approach is that one simplifier part may enable another to its job after. Running the simplifier
 once is therefore not satisfactory and we must run it until it reaches a sort of \textit{fixed point}. At least up until some
@@ -290,8 +292,9 @@ will not operate on the result of the rewrite rule directly in the same phase. T
 to occur in the LHS of a different rewrite rule which is to be desired over inlining at first.
 
 \subsection{The worker/wrapper transformation}
+\label{section:background:worker_wrapper}
 
-The \textit{worker/wrapper} transformation is able to change the type of computation (typically a loop) into a \textit{worker}
+The \textit{worker/wrapper} transformation is able to change the type of computation (typically a loop) into a \textit{worker} function
 along with a \textit{wrapper} that can convert back to the original type. The example listed on the GHC wiki is that of the reverse
 function on lists \cite{ghc_wiki_wwrapper}. One might concisely define with direct recursion and the \mono{++} operator:
 
@@ -322,11 +325,11 @@ Impressively, the transformation may also greatly improve the constant factor of
 Unlike strict languages, the \mono{Int} type in Haskell --- while always representing a 64 bit integer --- is not statically sized.
 After all, any value is lazy and may therefore still be unevaluated thunk whose size is unknown at compile time. As a result, \mono{Int}s
 are always stored on the heap and thus require runtime allocation. However, \mono{Int} has a strict counterpart \mono{Int#} (unboxed integer)
-in which it is defined: \hs{data Int = Int Int#}. Computations on \mono{Int#}s can be evaluated much more cheaply since such values can be
+in which it is defined: \hs{data Int = I# Int#}. Computations on \mono{Int#}s can be evaluated much more cheaply since such values can be
 stored on the stack.
 
-Knowing this, we can opt to employ the worker/wrapper transformation not add state to the worker, but change the types to their unboxed counterparts.
-Naturally the wrapper operation is then simply the constructor of the lazy type. Let us consider the example of the recursive \mono{triangular} function which
+Knowing this, we can opt to create a worker that does add state to the computation, but changes the types to their unboxed counterparts.
+Naturally the wrapper operation is then simply the constructor of the lazy type \hs{I#}. Let us consider the example of the recursive \mono{triangular} function which
 given a number \mono{n} returns the sum of all numbers from 1 to \mono{n}:
 
 \begin{listing}[H]
@@ -337,26 +340,17 @@ triangular n = n + triangular (n-1)
 \end{minted}
 \end{listing}
 
-Although an all knowing compiler could have determined that the result of \mono{triangular} can simply be calculated numerically in constant time as \mono{n * (n+1) / 2},
-we can still trust that GHC to remove the need for an allocation at each recursive call:
+Although an all-knowing compiler could have determined that the result of \mono{triangular} can simply be calculated numerically in constant time as $\frac{n^2 + n}{2}$,
+we can still trust GHC to remove the need for an allocation at each recursive call:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
 wtriangular :: Int# -> Int#
-wtriangular ww = case ww of
-  { 0 -> 0
-    ds -> case wtriangular
-                 (GHC.Prim.-# ds 1) of
-      { ww -> GHC.Prim.+# ds ww
-      }
-  }
+wtriangular 0 = 0
+wtriangular n = GHC.Prim.+# n (wtriangular (GHC.Prim.-# n 1))
 
 triangular :: Int -> Int
-triangular w = case w of
-  { I# ww -> case wtriangular ww of
-      { ww -> GHC.Types.I# ww
-      }
-  }
+triangular (I# w) = I# (wtriangular w)
 \end{minted}
 \end{listing}
 
@@ -364,7 +358,7 @@ To get a feeling for the difference in performance, we can compare the runtime o
 
 \begin{table}[H]
 \begin{tabular}{|l|l|}
-\textbf{Snippet} & \textbf{Result of \mono{time}}\\
+\textbf{Snippet} (compiled with -O0) & \textbf{Result of \mono{time} with input \mono{10000000}}\\
 \hline \\
 \mono{original} & 0,10s user 0,03s system 99\% cpu 0,132 total \\
 \mono{transformed} & 0,01s user 0,01s system 98\% cpu 0,023 total \\
@@ -373,16 +367,20 @@ To get a feeling for the difference in performance, we can compare the runtime o
 \end{table}
 
 It might not be immediately intuitive why the performance differs so drastically and where exactly these seemingly evil allocation occur.
-The ridiculousness of the original function becomes apparent when we consider a C implementation with the same allocation behavior:
+The ridiculousness of the original function becomes apparent when we consider a C implementation with the same allocation behavior. 
+Although lacking in laziness, we can consider an \mono{Int} to map to a \mono{long*} (pointing to heap allocated memory) 
+and an \mono{Int#} to map to a plain \mono{long}.
+
 
 \begin{minted}[linenos]{c}
 #include <stdio.h>
 #include <stdlib.h>
 
-// utility function for heap allocation a 64 bit integer
+// utility function for heap allocating a 64 bit integer
 long* alloc_long() { return (long*)malloc(sizeof(long)); }
 
 long* triangular(const long* n_ptr) {
+  // allocate the return value
   long* ret = alloc_long();
   // derefence the pointer into a value
   long n = *n_ptr;
@@ -396,12 +394,226 @@ long* triangular(const long* n_ptr) {
 }
 \end{minted}
 
-Rest assured that any C programmer suggesting this implementation would get some weird looks.
+Rest assured that any C programmer suggesting this implementation would get some very weird looks.
+
+\subsection{Analysis transformations}
+
+Consider again the Core ADT given in \cref{section:background:core_lang}, it was mentioned that the \mono{Var}
+type is used to represent variables and their various properties. We look into the one field of \mono{Var} that
+is dynamic during the core2core pipeline: \mono{IdInfo}.
+
+This data type follows the concept of weakening of information, i.e. the information is never incorrect but
+may be less precise or even missing. Furthermore, the \mono{IdInfo} may differ for different \mono{Var} instances
+that refer to the same variable.
+
+It is as of \mono{ghc-9.4.2} defined as:
+
+\begin{listing}[H]
+\begin{minted}[linenos,fontsize=\footnotesize]{haskell}
+data IdInfo
+  = IdInfo {
+        ruleInfo        :: RuleInfo,
+        -- ^ Specialisations of the 'Id's function which exist.
+        -- See Note [Specialisations and RULES in IdInfo]
+        realUnfoldingInfo   :: Unfolding,
+        -- ^ The 'Id's unfolding
+        inlinePragInfo  :: InlinePragma,
+        -- ^ Any inline pragma attached to the 'Id'
+        occInfo         :: OccInfo,
+        -- ^ How the 'Id' occurs in the program
+        dmdSigInfo      :: DmdSig,
+        -- ^ A strictness signature. Digests how a function uses its arguments
+        -- if applied to at least 'arityInfo' arguments.
+        cprSigInfo      :: CprSig,
+        -- ^ Information on whether the function will ultimately return a
+        -- freshly allocated constructor.
+        demandInfo      :: Demand,
+        -- ^ ID demand information
+        bitfield        :: {-# UNPACK #-} !BitField,
+        -- ^ Bitfield packs CafInfo, OneShotInfo, arity info, LevityInfo, and
+        -- call arity info in one 64-bit word. Packing these fields reduces size
+        -- of `IdInfo` from 12 words to 7 words and reduces residency by almost
+        -- 4% in some programs. See #17497 and associated MR.
+        --
+        -- See documentation of the getters for what these packed fields mean.
+        lfInfo          :: !(Maybe LambdaFormInfo),
+
+        -- See documentation of the getters for what these packed fields mean.
+        tagSig          :: !(Maybe TagSig)
+    }
+\end{minted}
+\end{listing}
+
+Through non-structure-altering transformations like \textit{Demamd Analysis} and \textit{Strictness Analysis} the \mono{IdInfo}
+record is updated accordingly. This information may then be used by future transformations that can only optimise safely or
+productively under certain circumstances (remember the disastrous work duplication in \cref{section:background:inlining2}?).
+
+The information contained in \mono{IdInfo} is a major source of complexity when it comes to comprehending Core. Consider
+for example this `pretty'-printed \mono{IdInfo} instance:
+
+\begin{listing}[H]
+\begin{minted}[linenos,fontsize=\footnotesize]{haskell}
+[GblId,
+ Arity=4,
+ Str=<L,U(U(U(U(C(C1(U)),A,C(C1(U)),C(U),A,A,C(U)),A,A),1*U(A,C(C1(U)),A,A),A,A,A,A,A),U(A,A,C(U),...etc.
+ Unf=Unf{Src=<vanilla>, TopLvl=True, Value=True, ConLike=True,
+         WorkFree=True, Expandable=True, Guidance=IF_ARGS [50 0 0 0] 632 0}]
+\end{minted}
+\end{listing}
+
+We can quickly learn of few things about the variable it describes. First,  it is apparently a function that has
+an arity of 4 (i.e. it takes 4 arguments). Secondly, we obtain some of the magic heuristic values involved with inlining
+(also known \textit{unfolding} hence \mono{Unf}). However, if we want to diagnose why for example this variable was evaluated
+lazily even though it is always used exactly once, we would have to decode the strictness signature under \mono{Str}.
+Currently, the best resource for decoding this would be to read the comments in the GHC source code itself.
 
 \section{The fusion system}
 \label{section:background:fusion}
 
-build/fold using rewrite rules
+Fusion --- the process of combining multiple operations over a structure into a single operation --- is in Haskell
+implemented using the \textit{build/foldr} idiom. This system was developed as an improvement on deforestation 
+(Waddler \cite{WADLER1990231}) which has shortcomings when it comes to recursive functions \cite{shortcut_fusion}.
+
+We borrow an example from Seo \cite{shortcut_fusion_blog} to illustrate how the build/foldr system works. Consider
+the example --- coincidentally very similar to \mono{triangular} (\cref{section:background:worker_wrapper}) --- of
+summing a list of numbers:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+foldr (+1) 0 [1..10]
+\end{minted}
+\end{listing}
+
+Very concise indeed but its execution would be much slower than say, an imperative for loop, because we first create
+a list and then consume it right away. If we look inside the definition of \mono{[1..10]} we find the function \mono{from}:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+from :: (Ord a, Num a) => a -> a -> [a]
+from a b = if a > b
+           then []
+           else a : from (a + 1) b
+\end{minted}
+\end{listing}
+
+Which is itself a specialisation for lists. We can write a more generic catamorphism that takes any due of constructors
+of type \mono{a -> b -> b} and \mono{b} (previously \mono{:} and \mono{[]}):
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+from' :: (Ord a, Num a) => a -> a -> (a -> b -> b) -> b -> b
+from' a b = \c n -> if a > b
+                    then n
+                    else c a (from' (a + 1) b c n)
+\end{minted}
+\end{listing}
+
+The glue between \mono{from} and \mono{from'} is the \textit{build} function, which requires the \mono{Rank2Types} language extension:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+build :: forall a. (forall b. (a -> b -> b) -> b -> b) -> [a]
+build g = g (:) []
+
+from a b = build (from' a b )
+\end{minted}
+\end{listing}
+
+Thusfar it seems we have only introduced more complexity. However, this is the point that we run into the key idea:
+\mono{build} is the antithesis of \mono{foldr} such that the following holds:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+foldr k z (build g) = g k z
+\end{minted}
+\end{listing}
+
+And this also gives us the main rewrite rule to make this system work. Observe how our original expression
+can now completely be reduced to a single integer value.
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+foldr (+) 0 (from 1 10)
+-- { inline from }
+foldr (+) 0 (build (from' 1 10))
+-- { apply rewrite rule }
+from' 1 10 (+) 0
+-- { inline from' }
+\c n -> (if 1 > 10
+            then n
+            else c 1 (from' 2 10 c n)) (+) 0
+-- { beta reduce }
+if 1 > 10
+   then 0
+   else 1 + (from' 2 10 (+) 0)
+-- { repeat until base case }
+1 + 2 + ... + 9 + 10 + 0
+-- { constant fold }
+55
+\end{minted}
+\end{listing}
+
+In the more general case, this system also relieves us from the burden of having to
+define rewrite rules for any combination of functions on lists, we merely need to be able to map each to a
+build/foldr structure. Some examples:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+map f xs    = build (\ c n -> foldr (\ a b -> c (f a) b) n xs)
+filter f xs = build (\ c n -> foldr (\ a b -> if f a then c a b else b) n xs)
+xs ++ ys    = build (\ c n -> foldr c (foldr c n ys) xs)
+concat xs   = build (\ c n -> foldr (\ x y -> foldr c y x) n xs)
+repeat x    = build (\ c n -> let r = c x r in r)
+zip xs ys   = build (\ c n -> 
+    let zip' (x:xs) (y:ys) = c (x,y) (zip' xs ys)
+        zip' _ _ = n
+    in  zip' xs ys)
+[]          = build (\ c n -> n)
+x:xs        = build (\ c n -> c x (foldr c n xs))
+\end{minted}
+\end{listing}
+
+We can see all some these functions at work when looking at the definition of \mono{unlines} and its subsequent
+reduction through the build/foldr system:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+unlines :: [String] -> String
+unlines ls = concat (map (\l -> l ++ ['\n']) ls)
+-- { rewrite concat and map }
+unlines ls = build
+  (\c0 n0 -> foldr (\xs b -> foldr c0 b xs) n0 ( build
+    (\c1 n1 -> foldr (\l t -> c1 (build
+      (\c2 n2 -> foldr c2 ( foldr c2 n2 ( build
+        (\c3 n3 -> c3 '\n' n3))) l )) t) n1 ls )))
+-- { apply rewrite rule foldr/build }
+unlines ls = build
+  (\c0 n0 ->
+    (\c1 n1 -> foldr (\l t -> c1 (build
+      (\c2 n2 -> foldr c2 (
+        (\c3 n3 -> c3 '\n' n3) c2 n2 ) l)) t) n1 ls)
+          (\xs b -> foldr c0 b xs) n0)
+-- { beta reduce }
+unlines ls = build
+  (\ c0 n0 -> foldr (\l t -> foldr c0 t( build
+    (\c2 n2 -> foldr c2 (c2 '\n' n2) l))) n0 ls)
+-- { apply rewrite rule foldr/build }
+unlines ls = build
+  (\c0 n0 -> foldr (\l b -> foldr c0 (c0 '\n' b) l) n ls)
+-- { inline build }
+unlines ls = foldr (\l b -> foldr (:) ('\n' : b) l) [ ] ls
+-- { inline foldr }
+unlines ls = h ls
+    where h [] = []
+          h (l:ls) = g l
+              where g [] = '\n' : h ls
+                    g (x:xs) = x : g xs
+\end{minted}
+\end{listing}
+
+What we end up with is the most efficient implementation of \mono{unlines} that we could possibly write by hand \cite{shortcut_fusion}.
+Because the list \text{ls} is the input of the function we cannot remove it all together, but keep in mind that when inlining this function
+at the use site, foldr/build fusion may apply again. 
 
 \section{Contemporary Haskell comprehension}
 
@@ -443,7 +655,7 @@ As can be read in the GHC documentation, the following suppression flags are ava
 
 \begin{table}[H]
   \begin{tabular}{p{0.35\linewidth}|p{0.65\linewidth}}
-  \textbf{GHC flag} & \textbf{Effect on core printing} \\
+  \textbf{GHC flag} & \textbf{Effect on Core printing} \\
   \hline
            & \\
   \mono{-dsuppress-all} & In dumps, suppress everything (except for uniques) that is suppressible.  \\
@@ -607,14 +819,14 @@ Unless you know exactly what to search for, this begs for a more ergonomic, filt
 
 \subsubsection{GHC Plugins}
 
-GHC --- being also playground for academics and enthusiasts alike --- is extremely flexible when it comes to
+GHC --- being also a playground for academics and enthusiasts alike --- is extremely flexible when it comes to
 altering its functionality. Using the now well established plugin interface, one is able to hook into almost
 any operation of the front- and midsection of the compiler. One such place is managing the core2core passes that
 will be run on the current module. This point of customization can be used to intersperse each core2core pass with an
 identity transformation that smuggles away a copy of the AST in its full form.
 
 One such existing plugin is \mono{ghc-dump} \cite{ghc_dump}. Besides extracting intermediate ASTs, it defines an
-auxiliary core definition to which it provides a GHC version agnostic mapping. This has the increased benefit of 
+auxiliary Core definition to which it provides a GHC version agnostic mapping. This has the increased benefit of 
 being able to directly compare snapshots from different GHC versions; A not uncommon task as discussed in \cref{section:communicating_core}.
 And while certainly being an improvement over plain text representation, we believe exploring and comparing such
 dumps requires a more rich interface.

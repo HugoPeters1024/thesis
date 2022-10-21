@@ -114,21 +114,6 @@ url = {https://github.com/input-output-hk/hs-opt-handbook.github.io},
   year={2022},
 }
 
-@article{c_inliner,
-author = {Davidson, Jack W. and Holler, Anne M.},
-title = {A study of a C function inliner},
-journal = {Software: Practice and Experience},
-volume = {18},
-number = {8},
-pages = {775-790},
-keywords = {Inline expansion, Code optimization},
-doi = {https://doi.org/10.1002/spe.4380180805},
-url = {https://onlinelibrary.wiley.com/doi/abs/10.1002/spe.4380180805},
-eprint = {https://onlinelibrary.wiley.com/doi/pdf/10.1002/spe.4380180805},
-abstract = {Abstract Although the inline expansion of subprograms has often been cited as a method for improving a program's execution time, few available compilers perform the operation, and fewer still perform it without requiring explicit direction from the programmer. The authors have written a tool called INLINER, which is a source-to-source filter that automatically performs inline expansion of C functions in a module. With this tool, the effect of inlining was investigated using a set of programs on several machines. The authors' findings are presented, including an instance (unrelated to the size of the inlined executable) in which inlining can diminish a program's performance, and evidence that the size of the inlined executable does not, in practice, prove to cause problems.},
-year = {1988}
-}
-
 @article{secrets_of_the_inliner,
 author = {Peyton Jones, Simon and Marlow, Simon},
 title = {Secrets of the Glasgow Haskell Compiler inliner},
@@ -156,4 +141,78 @@ title = {The worker/wrapper transformation},
 volume = {19},
 journal = {Journal of Functional Programming},
 doi = {10.1017/S0956796809007175}
+}
+
+@article{shortcut_fusion,
+author = {Gill, Andy and Launchbury, John and Peyton Jones, Simon},
+year = {1995},
+month = {04},
+pages = {},
+title = {A Short Cut to Deforestation},
+journal = {[No source information available]},
+doi = {10.1145/165180.165214}
+}
+
+@misc{shortcut_fusion_blog, 
+    author = {Yul Seo, Kwang},
+    title = {Short cut fusion: https://kseo.github.io/posts/2016-12-18-short-cut-fusion.html},
+    year = 2016,
+    url = {https://kseo.github.io/posts/2016-12-18-short-cut-fusion.html},
+    urldate = {2022-10-17}
+}
+
+@inproceedings{inling_magic_numbers,
+author = {Hollenbeck, Celeste and O'Boyle, Michael F. P. and Steuwer, Michel},
+title = {Investigating Magic Numbers: Improving the Inlining Heuristic in the Glasgow Haskell Compiler},
+year = {2022},
+isbn = {9781450394383},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3546189.3549918},
+doi = {10.1145/3546189.3549918},
+abstract = {Inlining is a widely studied compiler optimization that is particularly important for functional languages such as Haskell and OCaml. The Glasgow Haskell Compiler (GHC) inliner is a heuristic of such complexity, however, that it has not significantly changed for nearly 20 years. It heavily relies on hard-coded numeric constants, or magic numbers, based on out-of-date intuition. Dissatisfaction with inlining performance has led to the widespread use of inlining pragmas by programmers. In this paper, we present an in-depth study of the effect of inlining on performance in functional languages. We specifically focus on the inlining behavior of GHC and present techniques to systematically explore the space of possible magic number values, or configurations, and evaluate their performance on a set of real-world benchmarks where inline pragmas are present. Pragmas may slow down individual programs, but on average improve performance by 10%. Searching for the best configuration on a per-program basis increases this performance to an average of 27%. Searching for the best configuration for each program is, however, expensive and unrealistic, requiring repeated compilation and execution. This paper determines a new single configuration that gives a 22% improvement on average across the benchmarks. Finally, we use a simple machine learning model that predicts the best configuration on a per-program basis, giving a 26% average improvement.},
+booktitle = {Proceedings of the 15th ACM SIGPLAN International Haskell Symposium},
+pages = {81–94},
+numpages = {14},
+keywords = {GHC, Inlining, Haskell},
+location = {Ljubljana, Slovenia},
+series = {Haskell 2022}
+}
+
+@misc{elm_lang, 
+    url={https://https://elm-lang.org/},
+    title={Elm: https://https://elm-lang.org/},
+    author={Evan Czaplicki}
+}
+
+@inproceedings{hashing_mod_alpha,
+author = {Maziarz, Krzysztof and Ellis, Tom and Lawrence, Alan and Fitzgibbon, Andrew and Peyton Jones, Simon},
+title = {Hashing Modulo Alpha-Equivalence},
+organization = {ACM},
+booktitle = {ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI'21)},
+year = {2021},
+month = {June},
+abstract = {In many applications one wants to identify identical subtrees of a program syntax tree.  This identification should ideally be robust to alpha-renaming of the program, but no existing technique has been shown to achieve this with good efficiency (better than O(n^2) in expression size). We present a new, asymptotically efficient way to hash modulo alpha-equivalence. A key insight of our method is to use a weak (commutative) hash combiner at exactly one point in the construction, which admits an algorithm with O(n*(log n)^2) time complexity. We prove that the use of the commutative combiner nevertheless yields a strong hash with low collision probability.},
+publisher = {ACM},
+url = {https://www.microsoft.com/en-us/research/publication/hashing-modulo-alpha-equivalence-2/},
+}
+
+@misc{haskell_to_elm,
+   author = { Olle Fredriksson },
+   title = { haskell-to-elm },
+   howpublished = {\url{https://hackage.haskell.org/package/haskell-to-elm}},
+   year = {2019}
+}
+
+@inproceedings{prettier_printer,
+  title={A prettier printer},
+  author={Philip Wadler and Joyce Kilmer},
+  year={2002}
+}
+
+@misc{prettier_printer_elm,
+   author = { pwentz },
+   title = { elm-pretty-printer },
+   howpublished = {\url{https://github.com/the-sett/elm-pretty-printer}},
+   year = {2019}
 }

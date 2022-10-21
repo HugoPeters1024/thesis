@@ -215,9 +215,13 @@ artefact.
 
 \section{Review of the tech stack}
 Elm does not provide amazing performance given the domain (mostly due to being strict),
-but it does make it easy to write haskell like code over an AST and thus requires less skill
-for other haskell programmers to contribute to. The final result is also just a website which is
+but it does make it easy to write Haskell like code over an AST and thus requires less skill
+for other Haskell programmers to contribute to. The final result is also just a website which is
 very minimal barrier to entry and can be used to share things.
+
+\section{Information lost}
+\mono{IdInfo} may vary among various instances referencing the same variable. Thus, our encoding with
+usages only by name may lose information.
 
 \section{Printing Core like GHC}
 If we truly wish to be a useful tool for GHC developers and experts alike, we must respect
@@ -225,8 +229,11 @@ that the current core printer form is well established and should provide at lea
 the tool prints in a very similar manner. This does not imply that a different beginner mode, as you
 could call the current state of affairs, that prints a more readable, slightly desugared version, 
 is not also invaluable in itself.
+
+
+
 \section{Post Core factors}
-Core2Core isn't everything, like in this issue: https://github.com/channable/alfred-margaret/issues/24.
+Core2Core is not everything, like in this issue: https://github.com/channable/alfred-margaret/issues/24.
 Things like STG and the backend are also part of the equation.
 
 \bibliographystyle{abbrv}
@@ -235,7 +242,5 @@ Things like STG and the backend are also part of the equation.
 \appendix
 \clearpage
 \pagenumbering{roman}
-\chapter{Appendix}
-An appendix here!
 
 \end{document}
