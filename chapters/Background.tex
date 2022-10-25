@@ -18,7 +18,7 @@ the types are preserved throughout the middle section, it can be verified that e
 Providing some evidence towards the correctness of the transformation.
 
 Regardless, the Haskell source language itself is not a good target for optimisation. The source has to be
-rich and expressive, which yields a datatype of over 100 constructors. Any transformation over such a datatype has far too
+rich and expressive, which yields an AST datatype of over 100 constructors. Any transformation over such a datatype has far too
 many cases to be considered practical to implement; Not to mention the myriad of bug-inducing edge cases. To overcome this issue, the
 middle section first performs a desugaring pass, translating the source language into a far simpler intermediate language
 called \textit{Core}. 
@@ -78,7 +78,8 @@ itself the reputation of being the workhorse of the pipeline \cite{ghc_wiki_core
 
 If you were looking for an atom, you have not found it. The simplifier is in itself again a collection of smaller transformations,
 albeit applied repeatedly and interleaved such that they cannot be easily untangled. Each simplifier subpart is a local transformation,
-that is, it only looks at the immediate surroundings of the expression. We give a near comprehensive list of each subpart along with an example:
+that is, it only looks at the immediate surroundings of the expression. We give a near comprehensive list of each subpart along with an example: 
+\cite{ghc_wiki_core2core}
 
 \subsubsection{Constant Folding}
 Evaluate expressions that require no runtime information. This is a very logical transformation that does not
@@ -93,7 +94,8 @@ require any further considerations.
 \end{minted}
 \end{listing}
 
-\subsubsection{Inlining-1}
+\subsubsection{Inlining}
+\label{section:background:inlining}
 
 Inlining function calls is a well known performance enhancing operation in all language, but especially so in functional ones.
 The difference is staggering with a around 10-15\% performance increase for conventional languages, as opposed to
@@ -114,14 +116,12 @@ f 3
 
 However, if the function is used in multiple locations with different arguments, you risk increasing the size of the program
 because the function body will be duplicated at each call-site. This is a trade-off that --- although often worth it --- must be
-considered on a case to case basis. GHC has a number of heuristics to determine whether inlining is worth it or not. Obviously,
-this cannot be a perfect solution and one can imagine how a small change in the code can suddenly cause the inliner to reverse
+considered on a case to case basis. GHC has a number of heuristics to determine whether inlining is worth it or not. \cite{secrets_of_the_inliner}
+Obviously, this cannot be a perfect solution and one can imagine how a small change in the code can suddenly cause the inliner to reverse
 its decision; a testament to the non-continuous nature of the compiler.
 
-\subsubsection{Inlining-2}
-\label{section:background:inlining2}
-
-Let bindings are often described as syntax sugar for lambda abstractions, there is an important difference to be considered.
+Besides inlining function calls, Haskell's let bindings also form an opportunity for inlining.
+After all, let bindings are often described as syntax sugar for lambda abstractions, but there is an important difference to be considered.
 Because let bindings in Haskell are lazily evaluated, it may lead to explosion if the let bound variable is used in a lambda
 expression. For example:
 
@@ -129,12 +129,12 @@ expression. For example:
 \begin{minted}{haskell}
 -- before, 'expensive' is called at most once
 let v = expensive 42
-    l x = ... v ...
-in map xs
+    l = \x -> ... v ...
+in map l xs
 
 -- after, 'expensive' is called for each element of 'xs'
-let l x = ... expensive 42 ...
-in map xs
+let l = \x -> ... expensive 42 ...
+in map l xs
 \end{minted}
 \end{listing}
 
@@ -162,13 +162,13 @@ Which inlining will transform into:
 safe_tail :: [a] -> [a]
 safe_tail ls = case ls of
     [] -> []
-    x:xs -> case xs of
+    x:xs -> case ls of
         [] -> error "tail of empty list"
         (x:xs) -> xs
 \end{minted}
 \end{listing}
 
-Since we scrutinize \mono{xs} again in the inner case, we actually already know that the second case is only ever called,
+Since we scrutinize \mono{ls} again in the inner case, we actually already know that the second case is only ever called,
 thus we can eliminate the case expression as a whole.
 
 \begin{listing}[H]
@@ -180,7 +180,7 @@ safe_tail ls = case ls of
 \end{minted}
 \end{listing}
 
-The removal of the call \mono{error} is a testament to this function being deserving of the \mono{safe} prefix.
+The removal of the call \mono{error} during this process is a testament to this function being deserving of the \mono{safe} prefix.
 
 \subsubsection{Case of case}
 
@@ -221,7 +221,8 @@ case x of
 \end{listing}
 
 Note that we do risk duplicating \mono{E1} and \mono{E2} if the expression does not reduce so completely.
-A solution to this are \textit{join points}, which we will not go into here for the sake of brevity.
+A solution to this are \textit{join points} \cite{compiling_wo_continuations},
+which we will not go into here for the sake of brevity.
 
 \subsubsection{Rewrite rules}
 
@@ -246,10 +247,10 @@ and we cannot know in advance how to best hit it. Therefore, we must ensure that
 has a lot of bullets in its gun to ensure being able to effectively hit a lot of targets \cite{haskell_optimisations_1997}.
 
 A secondary problem with this approach is that one simplifier part may enable another to its job after. Running the simplifier
-once is therefore not satisfactory and we must run it until it reaches a sort of \textit{fixed point}. At least up until some
+once is therefore not satisfactory, and we must run it until it reaches a sort of \textit{fixed point}; At least up until some
 arbitrary limit since there is no guarantee such a fixed point exists and even if it does that we find it and not get stuck in a loop.
 
-Aforementioned looping beheavior can actually occur quite easily due to certain rewrite rules. It is not always the case that
+Aforementioned looping behavior can actually occur quite easily due to certain rewrite rules. It is not always the case that
 the RHS of a rewrite rules objectively better than the right. It might be that the rewrite is benificial because it \textbf{may}
 enable other optimisation to take place afterwards. However, if for some reason that did not turn out to be possible, we may want
 to apply the reverse rewrite rule later. This is obviously problematic as we can be ping-pong between rewrite rules forever.
@@ -266,8 +267,8 @@ In order, the simplifier is --- rather unintuitively --- interspersed between ot
   \item \textbf{Final}
 \end{enumerate}
 
-By default, rewrite rules as well as inlinings can occur in each of these phases but the programmer does have to ability
-to specify devations from this beheavior. For example, in the \mono{text} library, we find in the \mono{Data.Text} module
+By default, rewrite rules as well as inlinings can occur in each of these phases but the programmer does have the ability
+to specify deviations from this behavior. For example, in the \mono{text} library, we find in the \mono{Data.Text} module
 the following snippet:
 
 \begin{listing}[H]
@@ -341,7 +342,9 @@ triangular n = n + triangular (n-1)
 \end{listing}
 
 Although an all-knowing compiler could have determined that the result of \mono{triangular} can simply be calculated numerically in constant time as $\frac{n^2 + n}{2}$,
-we can still trust GHC to remove the need for an allocation at each recursive call:
+we can still trust GHC to infer an important property about the function using strictness analysis. Namely: \mono{triangular} does not produce any intermediate results that can
+used without evaluating the whole of \mono{triangular}. That is: if you are willing to spent any amount of time on \mono{triangular}, you might as well calculate the whole thing.
+Thus GHC decides to rewrite the function using a strict worker, removing the need for many dubious allocations:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -363,7 +366,7 @@ To get a feeling for the difference in performance, we can compare the runtime o
 \mono{original} & 0,10s user 0,03s system 99\% cpu 0,132 total \\
 \mono{transformed} & 0,01s user 0,01s system 98\% cpu 0,023 total \\
 \end{tabular}
-\caption{The runtime of each listing. We can see that the optimisation has increased runtime performance by a significant factor.}
+\caption{The runtime of both version of \mono{triangular}. We can see that the worker/wrapper tranformation has increased runtime performance by a significant factor.}
 \end{table}
 
 It might not be immediately intuitive why the performance differs so drastically and where exactly these seemingly evil allocation occur.
@@ -446,7 +449,7 @@ data IdInfo
 
 Through non-structure-altering transformations like \textit{Demamd Analysis} and \textit{Strictness Analysis} the \mono{IdInfo}
 record is updated accordingly. This information may then be used by future transformations that can only optimise safely or
-productively under certain circumstances (remember the disastrous work duplication in \cref{section:background:inlining2}?).
+productively under certain circumstances (remember the disastrous work duplication in \cref{section:background:inlining}?).
 
 The information contained in \mono{IdInfo} is a major source of complexity when it comes to comprehending Core. Consider
 for example this `pretty'-printed \mono{IdInfo} instance:
@@ -470,7 +473,7 @@ Currently, the best resource for decoding this would be to read the comments in 
 \section{The fusion system}
 \label{section:background:fusion}
 
-Fusion --- the process of combining multiple operations over a structure into a single operation --- is in Haskell
+Fusion --- the process of combining multiple operations over a structure into a single operation --- is in GHC
 implemented using the \textit{build/foldr} idiom. This system was developed as an improvement on deforestation 
 (Waddler \cite{WADLER1990231}) which has shortcomings when it comes to recursive functions \cite{shortcut_fusion}.
 
@@ -496,8 +499,8 @@ from a b = if a > b
 \end{minted}
 \end{listing}
 
-Which is itself a specialisation for lists. We can write a more generic catamorphism that takes any due of constructors
-of type \mono{a -> b -> b} and \mono{b} (previously \mono{:} and \mono{[]}):
+Which is itself a specialisation for lists. We can write a more generic catamorphism that takes any duo of constructors
+of type \mono{a -> b -> b} and \mono{b} respectively (previously \mono{:} and \mono{[]}):
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -508,7 +511,8 @@ from' a b = \c n -> if a > b
 \end{minted}
 \end{listing}
 
-The glue between \mono{from} and \mono{from'} is the \textit{build} function, which requires the \mono{Rank2Types} language extension:
+The glue between \mono{from} and \mono{from'} is the \textit{build} function, which requires the \mono{Rank2Types} language extension
+and re-specialises these generic functions back to lists.
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -519,8 +523,8 @@ from a b = build (from' a b )
 \end{minted}
 \end{listing}
 
-Thusfar it seems we have only introduced more complexity. However, this is the point that we run into the key idea:
-\mono{build} is the antithesis of \mono{foldr} such that the following holds:
+Thus far it seems we have only introduced more complexity without any apparent benefit. 
+However, this is the point that we run into the key idea: \mono{build} is the antithesis of \mono{foldr} such that the following holds:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -528,8 +532,8 @@ foldr k z (build g) = g k z
 \end{minted}
 \end{listing}
 
-And this also gives us the main rewrite rule to make this system work. Observe how our original expression
-can now completely be reduced to a single integer value.
+And this also gives us the main reductive rewrite rule to make this system work. Observe how our original expression
+can now completely be reduced to a single integer value:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -573,8 +577,8 @@ x:xs        = build (\ c n -> c x (foldr c n xs))
 \end{minted}
 \end{listing}
 
-We can see all some these functions at work when looking at the definition of \mono{unlines} and its subsequent
-reduction through the build/foldr system:
+We can see some these functions at work when looking at the definition of \mono{unlines} and its subsequent
+reductions through the build/foldr system:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -612,7 +616,7 @@ unlines ls = h ls
 \end{listing}
 
 What we end up with is the most efficient implementation of \mono{unlines} that we could possibly write by hand \cite{shortcut_fusion}.
-Because the list \text{ls} is the input of the function we cannot remove it all together, but keep in mind that when inlining this function
+Because the list \text{ls} is the input of the function we cannot remove it all together, but keep in mind that when inlining call to this function
 at the use site, foldr/build fusion may apply again. 
 
 \section{Contemporary Haskell comprehension}
@@ -642,6 +646,7 @@ a steep barrier to entry.
 \subsection{Current tooling}
 
 \subsubsection{GHC itself}
+\label{section:background:ghc}
 
 
 Core snippets of your program can easily be coerced out of GHC. The most information you can get
@@ -690,7 +695,7 @@ quicksort (x:xs) = quicksort (filter (< x) xs) ++ [x] ++ quicksort (filter (>= x
 The desugared Core without suppression:
 
 \begin{listing}[H]
-\begin{minted}[linenos,fontsize=\footnotesize]{haskell}
+\begin{minted}[linenos,fontsize=\footnotesize]{text}
 -- RHS size: {terms: 55, types: 47, coercions: 0, joins: 0/10}
 quicksort :: forall a. Ord a => [a] -> [a]
 [LclIdX]
@@ -770,7 +775,7 @@ quicksort
 The same desugared Core representation with the \mono{-dsuppress-all} flag:
 
 \begin{listing}[H]
-\begin{minted}[linenos,fontsize=\footnotesize]{haskell}
+\begin{minted}[linenos,fontsize=\footnotesize]{text}
 -- RHS size: {terms: 55, types: 47, coercions: 0, joins: 0/10}
 quicksort
   = \ @ a_a1pH $dOrd_a1pJ ->
