@@ -15,6 +15,46 @@ mutually recursive algebraic datatypes are very pervasive in the Core AST, we fe
 if the frontend language had first class support for this. This naturally led to us to Elm, a functional language
 that compiles to Javscript \cite{elm_lang}.
 
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\textwidth]{figs/architecture.png}
+  \caption{Dataflow diagram of the tool}
+  \label{fig:architecture}
+\end{figure}
+
+
+% \digraph{abc}{
+%   rankdir=LR
+%     
+%   source [label = "✍source",shape=MSquare, color="darkolivegreen4",style=filled]
+% 
+%   subgraph plugin {
+%     style=filled;
+%     color=lightgrey;
+%     node [style=filled,color=gray,shape=box];
+%     label = "plugin";
+%     
+%     ghc [label="🔨GHC",color="darkorchid"]
+%     plugin [color="brown1",label="🧩plugin"]
+%     dump1 [label = "📁dump.zip"]
+%     dump2 [label = "📁dumb.zip"]
+%   
+%     source -> ghc
+%     plugin -> ghc [dir=both]
+%     plugin -> dump1
+%     dump1 -> dump2 [style=dotted]
+%   
+%     dump2 -> frontend
+%   }
+% 
+%   subgraph frontend {
+%     node [style=filled];
+%     label = "frontend";
+%     color=blue
+%     frontend [color=lightblue,label="🕵frontend"]
+%   }
+% }
+% 
 \section{Creating the GHC plugin}
 
 By far the most logical and convenient method for obtaining all the available information in the AST it to capture
@@ -239,6 +279,22 @@ removeUnfolding x = x
 
 This reduces the size of captures in some cases by a factor of 2.
 
+\subsection{Interactions}
+
+Asside from a more human readible representation and syntax highlighting, the user is further supported by
+a number of interactive features. These include:
+
+\begin{itemize}
+  \item Highlighting binding and call sites of a variable on hover
+  \item Renaming variables
+  \item Toggling various Core display options such as hiding typelevel terms and type applications, desugaring
+        leading lambda abstractions, etc.
+  \item Multiple approaches to hiding toplevel bindings such as hiding all but the selected binding, which
+        can conveniently be followed up by un-hiding its referenced bindings transitively.
+  \item A variable detail popup that shows all the available information of a variable.
+  \item Querying variables and their types on Hoogle.
+\end{itemize}
+
 \subsection{Improving performance with cache semantics}
 
 The way that Elm operates --- like many other interactive browser based applications --- is by rendering the HTML on every
@@ -254,7 +310,7 @@ the aforementioned diffing still takes place, reducing the cost of the update to
 any updates that do affect the output of the pretty printer might still cause some stutters, but the frequency of such updates is 
 generally far lower.
 
-\subsection{Deployment}
+\subsection{Note on deployment}
 
 By virtue of being solely a stateless HTML + JavaScript application after compilation, means that the frontend can
 easily and cheaply be deployed to any static file hosting service. Because the dump files are never send to the server,

@@ -145,73 +145,8 @@ have been resolved faster?
 \newpage
 
 
-
-\chapter{Results}
-
-\section{Tour of the tool}
-Basic outline to prepare for the 'experiments' ahead
-
-\section{Lists vs Streams}
-Here we discuss the basic of the stream paper, how it operates, why haskell has moved on by using join points and
-finally how the compilation pipeline treats these 2.
-
-Perhaps repeat the unlines example from the background section.
-
-\section{Diagnosing a failing inspection test}
-
-Hearkening back to \mono{inspection-testing} discussed in \cref{section:introduction_inspection_testing}, we put
-ourselves in the shoes of a programmer who gets surprised by a failing inspection test and reason how she might
-employ HsComprehension to diagnose the problem. She breaks the process down into a number of steps.
-
-\paragraph{1. Isolate the problem}
-Modules typically contain more than 1 function and during the core2core transformations many more auxiliary functions are
-added and many functions are inlined to produce exponentially more code. To get good data it is helpful to temporarily isolate the
-failing test case into a separate module. She is able to reproduce the following minimal case:
-
-
-\begin{minted}{haskell}
-{-# LANGUAGE TemplateHaskell #-}
-
-module InspectionTests where
-
-import Test.Inspection
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import Data.ByteString
-
-countChars :: ByteString -> Int
-countChars = T.length . T.toUpper . TE.decodeUtf8
-
--- the failing test case
-inspect $ 'countChars `hasNoType` ''T.Text
-\end{minted}
-
-The following error is produced by the build:
-
-\begin{minted}{sh}
-app/InspectionTests.hs:21:1: countChars `hasNoType` Data.Text.Internal.Text failed:
-# ...
-# 700 lines of core as seen at the end of the core2core pipeline
-# ...
-\end{minted}
-
-So despite isolating the problem, the amount of textual data generate is still unwieldy.
-It is also incomplete in the sense that it does not show the process that produced this final
-artefact.
-
-\paragraph{2. Creating a dump}
-
-
-% Trying to reach the same conclusion as https://github.com/haskell/text/issues/202 (recursing into the mentioned https://github.com/haskell/text/pull/348)
-
-
-\section{Performance regression at Channable}
-
-%https://github.com/haskell/text/issues/202
-%https://github.com/haskell/text/pull/348
-%
-%Another performance regression: https://gitlab.haskell.org/ghc/ghc/-/issues/22207
-
+\input{chapters/Results.tex}
+\newpage
 
 \chapter{Discussion}
 
@@ -232,11 +167,16 @@ the tool prints in a very similar manner. This does not imply that a different b
 could call the current state of affairs, that prints a more readable, slightly desugared version, 
 is not also invaluable in itself.
 
-
-
 \section{Post Core factors}
 Core2Core is not everything, like in this issue: https://github.com/channable/alfred-margaret/issues/24.
 Things like STG and the backend are also part of the equation.
+
+\section{Rewrite Rules are evil?}
+This discussion: https://github.com/haskell/text/pull/348 makes a pretty good case for never doing fusion with
+rewrite rules.
+
+\section{Future work}
+Core AST with tree that grow or at least enabling GHC to add marker nodes like InlinedFrom "function" Expr.
 
 \bibliographystyle{abbrv}
 \bibliography{refs}

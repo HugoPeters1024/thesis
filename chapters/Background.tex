@@ -532,8 +532,17 @@ foldr k z (build g) = g k z
 \end{minted}
 \end{listing}
 
-And this also gives us the main reductive rewrite rule to make this system work. Observe how our original expression
-can now completely be reduced to a single integer value:
+And this also gives us the main reductive rewrite rule to make this system work.
+So to summarize, we have shown that generalizing lists to list producing functions to catamorphisms
+over list like arguments, produces a common interface exposing the elimination of code. More concretely,
+because we keep \mono{g} as a generic function, we can choose to give it the arguments of the consequent
+\mono{foldr} directly and thus eliminate the intermediate list. This is again a situation like the assembly line
+workers analogy from \cref{section:introduction:inspection_testing}; It is very productive to communicate about
+functions taking and producing lists, but actually doing so in a chained context is like wrapping and unwrapping
+boxes at every step.
+
+Analogies aside, observe how our original expression can now completely be reduced to a single integer value
+by rewriting \mono{from} with this common interface.
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -557,9 +566,11 @@ if 1 > 10
 \end{minted}
 \end{listing}
 
-In the more general case, this system also relieves us from the burden of having to
-define rewrite rules for any combination of functions on lists, we merely need to be able to map each to a
-build/foldr structure. Some examples:
+But what if there is no \mono{foldr} in the expression? What if we use simpler functions like \mono{map} or \mono{filter}?
+Well, as most introductory Haskell courses are likely to tell you, most list functions can be defined in terms of \mono{foldr}.
+Thus, we can similarly use rewrite rules to map all these common list functions to a combination \mono{build} and \mono{foldr}.
+This idea also relieves us from the burden of having to define rewrite rules for all the million possible 
+combination of lists operations:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
