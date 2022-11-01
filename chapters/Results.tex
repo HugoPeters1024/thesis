@@ -103,7 +103,17 @@ Core in the desugared stage (so without any transformations yet applied). Scroll
 the intermediate Core ASTs that were produced by the compiler. Whenever rewrite rules are fired they are included
 as comments at the top of the module.
 
-If we scroll all the way to the end, we get the same final Core AST as we saw in the error message. Granted,
+As you can see, the desugaring process has produced another top-level definition, namely \mono{\$trModule}. Since we
+not care for anything but our \mono{countChars} function at this time, we can elect to filter out all other definitions,
+including those that will be generated in the future: 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{figs/countchars_hideallbut.png}
+\label{fig:countchars_3}
+\end{figure}
+
+If we then scroll all the way to the end, we get the same final Core AST as we saw in the error message. Granted,
 we now have syntax highlighting and a slightly more readable representation, but it is still unwieldy. Using
 a basic string search we can find the needle in the haystack:
 
@@ -122,14 +132,14 @@ Specifically, we can go back to the first moment where no \mono{Text} constructo
 \end{figure}
 
 We find a far more manageable definition of \mono{countChars} that has partially been transformed to operate on streams (\mono{Stream Char}).
-This is a concept based on the work of D. Couts et al. \cite{stream_fusion}, we will discuss its theory more
+This is a concept to faciliate fusion based on the work of D. Couts et al. \cite{stream_fusion}, we will discuss its theory more
 in depth in next section. For now, it is only important to realise that instead of embedding the
 incoming \mono{ByteString} in a \mono{Text} value, we are converting to a \mono{Stream Char} first before \mono{unstream}
-converts to an actual \mono{Text}. The argument that this is not necessary still holds because there exists a length
+converts to an actual \mono{Text}. The argument that this is not necessary still holds because there conceivably exists a length
 function for values of type \mono{Stream Char} as well. 
 
-So we can conclude that the \mono{text}'s fusion did not fully work as expected because it is conceivable to find the
-length of stream directly using some alternative \mono{length :: Stream Char -> Int} function. 
+So we can conclude that the \mono{text}'s fusion machinery did not produce the optimal result because it is conceivable to find the
+length of a stream directly using some alternative \mono{length :: Stream Char -> Int} function.
 
 \paragraph{4. Back to the future}
 
@@ -149,7 +159,7 @@ find the first moment where the two captures converge. This happens to be at pha
 \includegraphics[width=0.9\textwidth]{figs/countchars_6.png}
 \end{figure}
 
-For clarity, let us extract the text from the left panel and the right panel and compare them:
+For clarity, let us extract the text from both panels and compare them:
 
 \begin{listing}[H]
 \begin{minted}[linenos,fontsize=\footnotesize]{haskell}
@@ -182,7 +192,7 @@ countChars x = Data.Text.Internal.Fusion.length
 
 The most notable difference is the extra rewrite rule that was fired in the patched version (line 18).
 Unfortunately, it is currently not possible to look up the definition of the rewrite rule in the tool itself, but
-we are given its name and originating module so, we can find it in the source of \mono{text} without too much effort:
+given that we know its name and originating module, we can find it in the source of \mono{text} without too much effort:
 
 \begin{listing}[H]
 \begin{minted}{haskell}
@@ -190,8 +200,8 @@ we are given its name and originating module so, we can find it in the source of
 \end{minted}
 \end{listing}
 
-From this we learn that at some point there was a stream/unstream pair to remove. Another difference is the origin
-of the \mono{length} function (\mono{Data.Text.Internal.Fusion.length} over \mono{Data.Text.length}). Like we predicted earlier,
+From this we learn that at some point there was a stream/unstream pair to remove. Another difference is the module from which
+the \mono{length} function is imported (\mono{Data.Text.Internal.Fusion.length} over \mono{Data.Text.length}). Like we predicted earlier,
 the patched version uses a variant that operates directly on streams:
 
 \begin{figure}[H]
@@ -200,7 +210,7 @@ the patched version uses a variant that operates directly on streams:
 \end{figure}
 
 Given that in the previous in pass the captures were identical, and since no rewrite rule fired regarding \mono{length},
-we can ascribe the difference to the inlining of \mono{length}. If we collect the definition of \mono{length} from both version
+we can ascribe the difference to the inlining of \mono{length}. If we collect the definition of \mono{length} from both versions
 of the text library we get:
 
 \begin{listing}[H]
@@ -219,13 +229,14 @@ length t = S.length (stream t)
 \end{minted}
 \end{listing}
 
-The only difference is the phase annotation of the \mono{INLINE} pragma. The patched version somehow decided that it was better
-to inline \mono{length} one simplifier phase earlier (remember, phase 1 comes before phase 0). And they turned out to be right,
-because inlining earlier uncovered the opportunity to successfully and remove any occurance of the \mono{Text} constructor.
+The only difference is the phase annotation of the \mono{INLINE} pragma. The maintainers somehow decided that it was better
+to inline \mono{length} one simplifier phase earlier (remember, phase 1 comes \textbf{before} phase 0). And they turned out to be right,
+because inlining earlier uncovered the opportunity for the \textit{stream/unstream} rule to fire and remove 
+the need to allocate an intermediate \mono{Text} value; Another exemplary manifestation of the Cascade Effect.
 
-\paragraph{5. Brittleness of implicit fusion}
+\paragraph{5. Epilogue: Brittleness of implicit fusion}
 At or around the same time as Breitner. \cite{inspection_testing} identified the failed fusion case, Andrew Lelechenko had discovered
-a problem involving the \mono{tail} function \cite{two_tails}. \mono{tail} just needs to drop the first character.
+a problem involving the \mono{tail} function \cite{two_tails} under fusion. \mono{tail} just needs to drop the first character.
 Despite needing to check whether to skip 1 or 2 bytes because of the UTF-16 encoding, this can be done in $O(1)$ time and memory.
 Obviously this property should still hold when applying \mono{tail} twice in row. As it turns out, it does not. The following steps occur:
 
@@ -243,8 +254,8 @@ By constructing a stream we have become committed to traversing the entire struc
 yielding an $O(n)$ time and memory version after ``optimisation''. This is different from the situation in \mono{countChars},
 where UTF-16 already dictated $O(n)$ runtime.
 
-The ending to this story is quite simply that implicit fusion was disabled entirely \cite{two_tails} for cases where this could occur.
-Frequent \mono{text} contributor, Oleg Grenrus, remarked on the proposal to remove it the following:
+The ending to this story is quite simply that implicit fusion was disabled entirely \cite{two_tails} for similar functions.
+Frequent \mono{text} contributor, Oleg Grenrus, remarked the following on the proposal to remove them:
 
 \textit{``I think this is the right thing to do. Implicit fusion is unpredictable, and you explain, doesn't even work in simple cases.''}
 

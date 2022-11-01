@@ -663,9 +663,10 @@ a steep barrier to entry.
 Core snippets of your program can easily be coerced out of GHC. The most information you can get
 is the Core AST at each pass of the optimisation pipeline by using \mono{-ddump-core2core}.
 To reduce the signal-to-noise ratio of Core snippets, one can use any number of suppression options.
-It is common to suppress type arguments and type applications for example. These are largely
-uninteresting because Core is only typed to facilitate the correctness preserving checks that \mono{core-lint} performs
-and do not affect the compilation in any way.
+It is common to suppress type arguments and type applications for example. These are commonly
+uninteresting to explicitly display because they are easily inferred by arguments to applications.
+Although types do sometimes influence the optimisation transformations -- making them interesting for display -- 
+they generate such a degree of syntactical noise that suppression is often desirable.
 
 As can be read in the GHC documentation, the following suppression flags are available to help to tame the beast.
 
