@@ -66,8 +66,8 @@ that compiles to Javascript \cite{elm_lang}.
 
 The least invasive option would be to parse the output of GHC given a number of \mono{-ddump} flags. However, for the sake
 of convenience and robustness, we instead decided to create a plugin that hook directly into the core2core pipeline and
-capture the ASTs completely has original value. By interspersing each transformation with snapshot action we have complete information
-and freedom. 
+capture the ASTs completely has original value. By interspersing each transformation with snapshot action we have as much information
+as we could reasonably hope for.
 
 \subsection{Capturing the information}
 \label{section:methods:capturing_info}
@@ -88,8 +88,8 @@ the AST with an environment.
 
 \subsection{Globally unique variables}
 
-It is not strictly necessary for variable names in a program to be unique. A variable name always
-references the nearest binding site; So too in Core. However, is not very convenient
+It is not strictly necessary for variable names in a Core program to be unique. A variable name always
+references the nearest binding site. However, is not very convenient
 when we want to analyze a certain variable in isolation. After all, we cannot know if two separate free variables
 with the same name are actually the same variable or live in a different scope. Consider the definition of tail:
 
@@ -102,8 +102,9 @@ tail xs = case xs of
 \end{listing}
 
 We cannot simply refer to the variable \mono{xs} as that name has two different binding sites.
-We solve this by running a \textit{uniquefication} as part of each snapshot that freshens all duplicate names in the entire
-module after each core2core transformation. This gives us the ability to refer to a binding site and its usages unambiguously using simply an integer.
+We solve this by running a \textit{uniquefication pass} as part of each snapshot that freshens all duplicate names in the entire
+module after each core2core transformation. After this operations every variable is globally unique. 
+This gives us the ability to refer to a binding site and its usages unambiguously using simply an identifying integer.
 The big idea here is that any viewing logic is completely decoupled from binding semantics:
 
 \begin{listing}[H]
@@ -137,11 +138,19 @@ noise can quickly become overwhelming despite change detection.
 
 \section{Creating the frontend application}
 
-We begin with a brief introduction to the Elm language and its concepts. Very much a domain specific language, Elm is 
-similar enough to Haskell to be familiar yet sufficiently simplified to be a frontend only language. The big idea is
-to have \textit{pure} and \textit{complete} functions for converting the application state to html as well as handling
-updates. These updates are triggered by so-called ``messages'' that are the result of user interaction. The simplicity
-focused design of the language is very much affirmed by number increment/decrement example \cite{elm_lang}:
+We begin with a brief introduction to the Elm language and its concepts. Elm is very much a domain specific language; It is 
+similar enough to Haskell to be familiar yet sufficiently simplified to be a frontend only language. It contrains the architecture
+to a trinity of concepts.
+
+\begin{itemize}
+  \item \textbf{Model} - The state of the application
+  \item \textbf{Update} - The way the state is updated: \mono{Message -> Model -> Model}
+  \item \textbf{View} - The way the state is rendered: \mono{Model -> Html}
+\end{itemize}
+
+The big idea is to have exclusively \textit{pure} and \textit{complete} functions to handle viewing and updates.
+These updates are triggered by so-called ``messages'' that are the result of user interaction like hovering, clicking, etc.
+The increment/decrement example is a testament to the simplicity focused design of the language \cite{elm_lang}:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{elm}
@@ -149,19 +158,18 @@ import Browser
 import Html exposing (Html, button, div, text)
 import Html.Events exposing (onClick)
 
-main =
-  Browser.sandbox { init = 0, update = update, view = view }
+main = Browser.sandbox { init = 0, update = update, view = view }
 
+type Model = Int
 type Msg = Increment | Decrement
 
+update : Msg -> Model -> Model
 update msg model =
   case msg of
-    Increment ->
-      model + 1
+    Increment -> model + 1
+    Decrement -> model - 1
 
-    Decrement ->
-      model - 1
-
+view : Model -> Html Msg
 view model =
   div []
     [ button [ onClick Decrement ] [ text "-" ]
@@ -172,7 +180,7 @@ view model =
 \end{listing}
 
 Unlike Haskell, the lack of explicit IO means that it feels justified to disallow any form of errors and by extent incomplete functions.
-This powerful property gives us great confidence in the correctness of our application.
+This powerful property gives us great confidence in the robustness of our application.
 
 \subsection{Reproducing the AST}
 
@@ -345,7 +353,7 @@ This reduces the size of captures in some cases by a factor of 2.
 
 \subsection{Interactions}
 
-Aside from a more human readable representation and syntax highlighting, the user is further supported by
+Aside from a more human-readable representation and syntax highlighting, the user is further supported by
 a number of interactive features. These include:
 
 \begin{itemize}
@@ -368,9 +376,9 @@ large Core expression the \mono{view} function starts to incur a significant cos
 actually affect the output of the pretty printer (events like \mono{onHover} and \mono{onClick} for example).
 Initially this led to some serious usability issues where the application would stutter and freeze.
 
-We were able to overcome this problem using the \mono{Html.Lazy} module, which takes some HTML producing closure and its arguments
+We were able to overcome this problem using the \mono{Html.Lazy} module. which takes some HTML producing closure and its arguments
 separately. If on some update the arguments have not changed, the closure is not evaluated and a cached result is returned. Regardless,
-the aforementioned diffing still takes place, reducing the cost of the update to negligible. Of course, we cannot get around the fact that
+the aforementioned diffing still takes place, reducing the cost of the update to something negligible. Of course, we cannot get around the fact that
 any updates that do affect the output of the pretty printer might still cause some stutters, but the frequency of such updates is 
 generally far lower.
 

@@ -1,0 +1,125 @@
+\chapter{Discussion \& Future work}
+
+\section{Review of the tech stack}
+
+Through extensive deriving and code generation, we have bridged the gap between the two programming languages in our tech-stack
+rather seamlessly. Overcoming this issue has led us to go down that path before realizing other drawbacks.
+
+Because we always envisioned a degree of intractability for exploring the dumps -- as that is the largest chunk of the value proposition --
+the creation of dumps should be a light task and in order to work on the newest version of GHC, the plugin needs to have
+a minimal dependency footprint. Initially we thought that serialising to JSON would a natural fit, however with the added requirement
+of needing to match the generated decoder at the Elm site, the JSON deriving strategy was dependend on more than just \mono{aeson}.
+Concretely, this means when working on the latest commit of GHC the odds are very high that the plugin won't work because the underlying
+dependencies are not compatible yet. We ran into this issue when trying to patch \mono{unlines} in \cref{section:results:unlines} and were
+forced to analyze the effect of our patches the old-fashioned way by sifting through the textual output of GHC like described in \cref{section:background:ghc}.
+
+Furthermore, the need to serialise the infinite Core AST datatype at all turns out to be problematic. 
+As described in \cref{section:methods:capturing_info}, to make the representation finite we need to address the
+issue of self-referential unfoldings by replacing call sites with only references to binding sites. This is fundamentally
+flawed because during our research we stumbled upon an inconvenient truth in the documentation of \mono{IdInfo}:
+
+\begin{listing}[H]
+\begin{minted}{text}
+Two 'Id's may have different info even though they have the same
+'Unique' (and are hence the same 'Id'); for example, one might lack
+the properties attached to the other.
+\end{minted}
+\end{listing}
+
+More research is needed as to when this issue crops up as relevant shortcoming, but needless to say it is a concerning flaw in the
+basis of our approach.
+
+It is not immediately obvious what alternatives there are. Ideally there is would no need to serialise at all by using a terminal application
+itself written in Haskell (at the cost of some interactive features that the web offers). But is not at all obvious how to plug in this into the
+compiler pipeline directly. Besides, comparing two different compiler runs is completely of the table in this approach. A Haskell terminal application could
+still relax some of the dependency pressure by using a far more stable serialisation library that is less likely to break with unreleased GHC versions.
+
+Considering that human inspection of code aligns more with the responsibilities of haskell language server than the compiler itself, the argument
+could be made that \mono{hls} is the right place to implement inspection tools. Similarly however, the counterargument that this goes beyond
+the scope of a language server is equally valid. 
+
+The tragic reality is that for this tool to work on bleeding edge GHC versions, it has itself to be part of the GHC build system, which is not
+realistic at this stage.
+
+\section{Embedding information in the AST}
+A fundamental problem with the current snapshot approach is the aggregation of multiple changes -- even multiple kinds of changes -- happening in between
+each snapshot. It is simply impractical to try to recover the full story that connects one snapshot to the next. This leads one to wonder the possibilities
+that would be unlocked if GHC embed information about the changes it has made directly in the AST. Consider for example a constructor that indicates
+that its contained expression was the result of an inlining:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+data Expr b = 
+  ...
+  | Inlined Expr InlineDetails
+  ...
+\end{minted}
+\end{listing}
+
+Obviously these added nodes could be omitted during normal compilation to not affect memory and performance. Less obvious however is how these extra
+nodes would interfere with the transformations themselves that often rely on deep matching. Take for example detecting an opportunity for beta-reduction:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+betaReduce :: Expr b -> Expr b
+betaReduce (App (Lam b e) arg) = substExpr b arg e
+betaReduce e = e
+\end{minted}
+\end{listing}
+
+The following invocation to \mono{betaReduce} would not work as expected:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+betaReduce (Inlined (App (Lam b e) arg) details) = Inlined (App (Lam b e) arg) details
+\end{minted}
+\end{listing}
+
+A good robust solution to this is not obvious. Furthermore, we need to respect correctness invariant of these extra nodes. If we do for example make
+an extra case for \mono{betaReduce}:
+
+\begin{listing}[H]
+\begin{minted}{haskell}
+betaReduce (Inlined (App (Lam b e) arg) details) = Inlined (substExpr b arg e) details
+\end{minted}
+\end{listing}
+
+Then one should wonder if the \mono{Inlined} 
+
+
+
+
+\section{Printing Core like GHC}
+
+We have showed how alternative Core printer is highly beneficial for newcomers and those interested in the syntactical structure of a program,
+it does not take away from the fact the current Core printer has its place. After all, reading Core as if it was Haskell is not entirely
+ingenuous. Take the complete ignorance towards showing which let bindings are join points for example. 
+
+In order to be complete tool, it should be possible to print Core is a way that is as close to the original GHC output as possible, but of
+course still with benefits of an interactive exploration frontend.
+
+\section{Post Core factors}
+
+Contrary to the design principle of the 3 stage compiler (\cref{section:background:core_lang}), where the Core transformation middlesection
+is responsible for all optimisations, this is simply not reasonable. There are a number of critical optimisations that are only possible on
+a level closer to the hardware. This means that performance regressions cannot always be attributed to the Core pipeline. A real world, exemplary
+encounter with this fact is a performance regression of \mono{alfred-margaret} \cite{alfred-margaret}, a Haskell implement of the \textit {Aho-Corasick}
+string search algorithm. After updating from GHC 8.8.4 to GHC 8.10.7 a 10$\%$ performance regression was observed, which is rather significant.
+After ruling out significant changes in the dependencies, it was noted that the used LLVM backend version 12 was not yet well-supported by the new GHC
+version. That is, LLVM 9 incidentally yielded better performance.
+
+There is simply no way to account for this in the Core pipeline. However, our tool could be extended to capture more extensive build information that
+can then be diffed during inspection. Therefore, if a user establishes that the Core is not the culprit, he or she can still request to get a report of
+all mutations in the build processes. This would include the LLVM version, the used C compiler, the used linker, the used assembler, etc. 
+This way the tool can still provide some leads during performance regression analysis.
+
+Lastly, it is reasonably feasible to retrieve information from GHC's \textit{Spineless, Taggless, G-machine} (STG), which converts the functional code
+to imperative form. This process similarly takes care of some optimisations that were otherwise not possible in the Core pipeline. Whether, and if so how, 
+this telemetry can play a useful role in the tool is an avenue for future research.
+
+\section{Rewrite rules and fusion}
+
+As part of collecting past Core related performance issues we made the observation that rewrite rules were often on the usual suspects, and rightly so.
+Especially rewrite rule based fusion, either within GHC itself or as part of custom library, comes with many brittle interactions that cause failures
+on specific cases are after small changes. This naturally begs the question if rewrite rules are a suitable method for implementing fusion. We believe
+research is needed to evaluate the feasibility of fusion specific transformations that rely on, and interfere less, with the simplifier.

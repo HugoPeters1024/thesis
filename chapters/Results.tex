@@ -48,9 +48,9 @@ app/InspectionTests.hs:21:1: countChars `hasNoType` Data.Text.Internal.Text fail
 It is also incomplete in the sense that it does not show the process that produced this final
 artifact.
 
-\paragraph{2. Creating a dump}
+\paragraph{2. Creating a capture}
 
-Because we only want to create a dump of this module, we can use an exported TemplateHaskell primitive
+Because we only want to create a capture of this module, we can use an exported TemplateHaskell primitive
 that registers the plugin for the current module only by simply adding the \mono{dumpThisModule} snippet 
 anywhere at the toplevel: 
 
@@ -86,9 +86,9 @@ produced.
 \label{fig:countchars_1}
 \end{figure}
 
-We then click to green arrow to reference the dump in the staging area. Here we could elect to stage more
-than one dump if we want to compare them. In this case we just interested in the current situation, and so we
-just open a single panel tab with this single dump:
+We then click the green arrow to reference the capture in the staging area. Here we could elect to stage more
+than one capture if we want to compare them. In this case we are only interested in the current situation, and so we
+just open a single panel tab with this single capture
 
 
 \begin{figure}[H]
@@ -103,7 +103,7 @@ Core in the desugared stage (so without any transformations yet applied). Scroll
 the intermediate Core ASTs that were produced by the compiler. Whenever rewrite rules are fired they are included
 as comments at the top of the module.
 
-As you can see, the desugaring process has produced another top-level definition, namely \mono{\$trModule}. Since we
+As you can see, the desugaring process has produced another top-level definition, namely \$\mono{trModule}. Since we
 not care for anything but our \mono{countChars} function at this time, we can elect to filter out all other definitions,
 including those that will be generated in the future: 
 
@@ -114,8 +114,7 @@ including those that will be generated in the future:
 \end{figure}
 
 If we then scroll all the way to the end, we get the same final Core AST as we saw in the error message. Granted,
-we now have syntax highlighting and a slightly more readable representation, but it is still unwieldy. Using
-a basic string search we can find the needle in the haystack:
+we now have syntax highlighting and a slightly more readable representation, but it is still unwieldy. Using a basic string search we can find the needle in the haystack:
 
 \begin{figure}[H]
 \centering
@@ -264,10 +263,267 @@ can be unpredictable, and by extent, how people would favour predictability over
 
 \section{Lists vs Streams}
 
+\begin{minted}{haskell}
+Rec {
+-- RHS size: {terms: 17, types: 17, coercions: 0, joins: 0/1}
+Main.unlines [Occ=LoopBreaker]
+  :: [GHC.Base.String] -> GHC.Base.String
+[GblId, Arity=1, Str=<1L>, Unf=OtherCon []]
+Main.unlines
+  = \ (ds_s26z [Occ=Once1!] :: [[GHC.Types.Char]]) ->
+      case ds_s26z of {
+        [] -> GHC.Types.[] @GHC.Types.Char;
+        : y_s26B [Occ=Once1] ys_s26C [Occ=Once1] ->
+          let {
+            sat_s26E [Occ=Once1, Dmd=ML] :: GHC.Base.String
+            [LclId]
+            sat_s26E = Main.unlines ys_s26C } in
+          case GHC.Base.++ @GHC.Types.Char y_s26B Main.main5
+          of sat_s26D [Occ=Once1]
+          { __DEFAULT ->
+          GHC.Base.++ @GHC.Types.Char sat_s26D sat_s26E
+          }
+      }
+end Rec }
+
+Rec {
+-- RHS size: {terms: 17, types: 18, coercions: 0, joins: 0/1}
+Main.unlines_go1 [Occ=LoopBreaker]
+  :: [[GHC.Types.Char]] -> [GHC.Types.Char]
+[GblId, Arity=1, Str=<1L>, Unf=OtherCon []]
+Main.unlines_go1
+  = \ (ds_s25d [Occ=Once1!] :: [[GHC.Types.Char]]) ->
+      case ds_s25d of {
+        [] -> GHC.Types.[] @GHC.Types.Char;
+        : y_s25f [Occ=Once1] ys_s25g [Occ=Once1] ->
+          let {
+            sat_s25i [Occ=Once1, Dmd=ML] :: [GHC.Types.Char]
+            [LclId]
+            sat_s25i = Main.unlines_go1 ys_s25g } in
+          case GHC.Base.++ @GHC.Types.Char y_s25f Main.main4
+          of sat_s25h [Occ=Once1]
+          { __DEFAULT ->
+          GHC.Base.++ @GHC.Types.Char sat_s25h sat_s25i
+          }
+      }
+end Rec }
+
+\end{minted}
+
+
+
+
 Here we discuss the basic of the stream paper, how it operates, why Haskell has not implemented it by favouring join points and
 finally how the compilation pipeline treats these 2.
 
 Perhaps repeat the unlines example from the background section.
+
+\section{Erroneous program structure recovery in GHC fusion}
+As part of our initial experiments to validate the tool, we decided to attempt to reproduce the shot-cut fusion of \mono{unlines} as presented
+in the paper \cite{shortcut_fusion}. This serendipitously led to the discovery of a performance bug in GHC. Namely, the definition:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+unlines :: [String] -> String
+unlines ls = concat (map (\l -> l ++ ['\n']) ls)
+\end{minted}
+\end{listing}
+
+can be observed to be compiled to the following Core using our tool:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+cr_chr :: Char
+cr_chr = C# '\n'
+
+cr :: [Char]
+cr = : cr_chr []
+
+go1 :: [[Char]] -> [Char]
+go1 ds = case ds of
+  { : y ys -> ++
+                (++ y cr)
+                (go1 ys)
+    [] -> []
+  }
+
+unlines :: [String] -> String
+unlines ls = go1 ls
+\end{minted}
+\end{listing}
+
+This definition is problematic because every line is first traversed to append a newline character and then again to append it to the rest of the line
+yielding an $O(n^2)$ runtime, while we already know that an $O(n)$ runtime is possible. We can confirm that this version is indeed less performant by
+benchmarking both \mono{unlines} and \mono{Prelude.unlines} on the first 73 lines of lorem ipsum:
+
+\begin{listing}[H]
+\begin{minted}{text}
+benchmarking our_unlines
+time                 127.9 μs   (125.0 μs .. 130.7 μs)
+                     0.997 R²   (0.996 R² .. 0.998 R²)
+mean                 126.6 μs   (124.6 μs .. 128.4 μs)
+std dev              6.532 μs   (5.742 μs .. 7.504 μs)
+variance introduced by outliers: 53% (severely inflated)
+
+benchmarking prelude_unlines
+time                 80.23 μs   (79.87 μs .. 80.53 μs)
+                     1.000 R²   (0.999 R² .. 1.000 R²)
+mean                 79.70 μs   (79.05 μs .. 80.13 μs)
+std dev              1.858 μs   (1.088 μs .. 2.962 μs)
+variance introduced by outliers: 20% (moderately inflated)
+\end{minted}
+\end{listing}
+
+So it is clear that \mono{Prelude} has defined \mono{unlines} in a more efficient manner, but that does not take away the fact that any such
+expression as our version of \mono{unlines} can reasonable expected to fuse in the most optimal manner. We investigate the reason for the suboptimal
+fusion by using our tool. The tool reports that the following Core is desugared from the source:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+unlines :: [String] -> String
+unlines ls = Data.Foldable.concat Data.Foldable.$fFoldable[]
+               (GHC.Base.map
+                  (\l -> GHC.Base.++ l
+                           (GHC.Base.build
+                              (\c n -> c
+                                         (GHC.Types.C# '\n') n))) ls)
+\end{minted}
+\end{listing}
+
+Here we can observe that the list literal \mono{['\n']} is already represented as a list producer function that is recognized nice with the short-cut fusion
+rules. We can hypthesize in the near future \mono{map} and \mono{++} will be rewritten to their \textit{build/foldr} representation, making the fusion rule
+applicable. After the first transformation, which is the also first pass of the simplifier, we get the following:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+unlines :: [String] -> String
+unlines ls = GHC.Base.build
+               (\c n -> GHC.Base.foldr
+                          (GHC.Base.mapFB
+                             (\x y -> GHC.Base.foldr c y x)
+                             (\l -> GHC.Base.build
+                                      (\c n -> GHC.Base.foldr c
+                                                 (c
+                                                    (GHC.Types.C# '\n') n) l))) n ls)
+\end{minted}
+\end{listing}
+
+We can see how concat has been specialized and also rewritten, as well as \mono{++}. The result of \mono{map} however, is a bit more peculiar; contrary to what the paper
+suggested at the time, we instead observe a call to some function \mono{mapFP}. The tool directly allows us to call upon Hoogle to find the definition of this function,
+and the extensive documentation of the GHC Base library gives us some context:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+-- Note eta expanded
+mapFB ::  (elt -> lst -> lst) -> (a -> elt) -> a -> lst -> lst
+{-# INLINE [0] mapFB #-} -- See Note [Inline FB functions] in GHC.List
+mapFB c f = \x ys -> c (f x) ys
+\end{minted}
+\end{listing}
+
+\begin{listing}[H]
+\begin{minted}[linenos]{text}
+{- Note [The rules for map]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The rules for map work like this.
+
+* Up to (but not including) phase 1, we use the "map" rule to
+  rewrite all saturated applications of map with its build/fold
+  form, hoping for fusion to happen.
+
+  In phase 1 and 0, we switch off that rule, inline build, and
+  switch on the "mapList" rule, which rewrites the foldr/mapFB
+  thing back into plain map.
+
+  It's important that these two rules aren't both active at once
+  (along with build's unfolding) else we'd get an infinite loop
+  in the rules.  Hence the activation control below.
+
+* This same pattern is followed by many other functions:
+  e.g. append, filter, iterate, repeat, etc. in GHC.List
+
+  See also Note [Inline FB functions] in GHC.List
+
+* The "mapFB" rule optimises compositions of map
+
+* The "mapFB/id" rule gets rid of 'map id' calls.
+  You might think that (mapFB c id) will turn into c simply
+  when mapFB is inlined; but before that happens the "mapList"
+  rule turns
+     (foldr (mapFB (:) id) [] a
+  back into
+     map id
+  Which is not very clever.
+
+* Any similarity to the Functor laws for [] is expected.
+-}
+
+{-# RULES
+"map"       [~1] forall f xs.   map f xs                = build (\c n -> foldr (mapFB c f) n xs)
+"mapList"   [1]  forall f.      foldr (mapFB (:) f) []  = map f
+"mapFB"     forall c f g.       mapFB (mapFB c f) g     = mapFB c (f.g)
+"mapFB/id"  forall c.           mapFB c (\x -> x)       = c
+  #-}
+\end{minted}
+\end{listing}
+
+This documentation does not give us any insight yet into the role of the \mono{mapFB} function. Perhaps the note \mono{[Inline FB functions]} can provide
+some more insight:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{text}
+Note [Inline FB functions]
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After fusion rules successfully fire, we are usually left with one or more calls
+to list-producing functions abstracted over cons and nil. Here we call them
+FB functions because their names usually end with 'FB'. It's a good idea to
+inline FB functions because:
+
+* They are higher-order functions and therefore benefits from inlining.
+
+* When the final consumer is a left fold, inlining the FB functions is the only
+  way to make arity expansion to happen. See Note [Left fold via right fold].
+
+For this reason we mark all FB functions INLINE [0]. The [0] phase-specifier
+ensures that calls to FB functions can be written back to the original form
+when no fusion happens.
+
+Without these inline pragmas, the loop in perf/should_run/T13001 won't be
+allocation-free. Also see Trac #13001.
+\end{minted}
+\end{listing}
+
+Here we find the answer to why \mono{mapFB} exists: ``\textit{alls to FB functions can be written back to the original form
+when no fusion happens}''. It is desirable to retain the structure of the original map if it is not fused away. \mono{mapFB} enables does just that,
+it exposes an initial opportunity to fuse but is reversible using the \textit{mapList} rule if no fusion happens. This has the convenient effect that 
+compiled code can more closely represent the original source code on the hand, but on the other hand also limits code size.
+
+Let's explore this further. If we always rewrite \mono{map} to  \mono{build (\c n -> foldr (\x r -> c (f x) r) n xs)}, then we lose some structure in the code.
+Every loop will then generate a local, recursive loop. For example, take the function: \mono{addTwo = map (+1) . map (+1)}.
+
+addTwo ds =
+      case ds of
+        [] -> []
+        y : ys ->
+          let xs = addTwo ys
+              x = y+2
+          in x:xs
+
+
+
+
+addTwo1 x -> x+2
+
+addTwo xs -> map addTwo1 xs
+
+
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+\end{minted}
+\end{listing}
+
 
 % Trying to reach the same conclusion as https://github.com/haskell/text/issues/202 (recursing into the mentioned https://github.com/haskell/text/pull/348)
 
