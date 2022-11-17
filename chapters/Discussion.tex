@@ -1,6 +1,7 @@
 \chapter{Discussion \& Future work}
 
 \section{Review of the tech stack}
+\label{section:discussion:review}
 
 Through extensive deriving and code generation, we have bridged the gap between the two programming languages in our tech-stack
 rather seamlessly. Overcoming this issue has led us to go down that path before realizing other drawbacks.
@@ -84,42 +85,56 @@ betaReduce (Inlined (App (Lam b e) arg) details) = Inlined (substExpr b arg e) d
 \end{minted}
 \end{listing}
 
-Then one should wonder if the \mono{Inlined} 
-
-
+Then one should wonder if the \mono{Inlined} tag is still entirely accurate. It might be more reasonable to have tags live for only 1 transformation
+step and be erased before the next one starts. This still allows for transient information to be captured and used for analysis without affecting
+the pipeline all that much. But of course, further research is needed.
 
 
 \section{Printing Core like GHC}
+\label{section:discussion:printing}
 
-We have showed how alternative Core printer is highly beneficial for newcomers and those interested in the syntactical structure of a program,
+We have shown how an alternative Core printer is highly beneficial for newcomers and those interested in the syntactical structure of a program,
 it does not take away from the fact the current Core printer has its place. After all, reading Core as if it was Haskell is not entirely
-ingenuous. Take the complete ignorance towards showing which let bindings are join points for example. 
+ingenuous. Take the complete ignorance towards showing which let bindings are join points for example, information that can be crucial to
+the transformation that a program undergoes.
 
-In order to be complete tool, it should be possible to print Core is a way that is as close to the original GHC output as possible, but of
-course still with benefits of an interactive exploration frontend.
+Simply summarized, it cannot be a complete tool without allowing to display the  Core in a way that is as close to the original 
+GHC output as possible, but of course still with benefits of an interactive exploration frontend. A skeleton for this alternative
+pretty printer has partially been implemented but finishing it is a matter of future work.
+
+\section{Incomplete transformation pipeline coverage}
+
+During our research we have mainly discovered and discussed Core-debugging scenarios that involved the general syntactical structure of the code.
+For example, which functions are being called after rewrite rules and inlinings.
+Although program structure analysis might in fact be the main constituent of most Core
+debugging sessions, we have barely scratched the surface of other problems that need to be debugged in Core,
+and by extent the suitability of our tool to do so. Examples here would be inadequately strong analysis results, preventing what would have been
+a sound and desirable transformation. One such under discussed topic is the role that correctly identifying join points play.
+More research is needed into the full spectrum of Core related problems and the information required to deal with them.
 
 \section{Post Core factors}
 
-Contrary to the design principle of the 3 stage compiler (\cref{section:background:core_lang}), where the Core transformation middlesection
-is responsible for all optimisations, this is simply not reasonable. There are a number of critical optimisations that are only possible on
-a level closer to the hardware. This means that performance regressions cannot always be attributed to the Core pipeline. A real world, exemplary
+Despite the idealistic design principle of the 3 stage compiler (\cref{section:background:core_lang}), where the Core transformation middle-section
+is responsible for all optimisations, reality throws a spanner in the works. A number of critical optimisations are only possible on
+a level closer to the hardware. Because of this, performance regressions cannot always be attributed to the Core pipeline. A real world, exemplary
 encounter with this fact is a performance regression of \mono{alfred-margaret} \cite{alfred-margaret}, a Haskell implement of the \textit {Aho-Corasick}
 string search algorithm. After updating from GHC 8.8.4 to GHC 8.10.7 a 10$\%$ performance regression was observed, which is rather significant.
 After ruling out significant changes in the dependencies, it was noted that the used LLVM backend version 12 was not yet well-supported by the new GHC
 version. That is, LLVM 9 incidentally yielded better performance.
 
 There is simply no way to account for this in the Core pipeline. However, our tool could be extended to capture more extensive build information that
-can then be diffed during inspection. Therefore, if a user establishes that the Core is not the culprit, he or she can still request to get a report of
-all mutations in the build processes. This would include the LLVM version, the used C compiler, the used linker, the used assembler, etc. 
+could then be diffed during inspection. Therefore, if a user establishes that the Core is not the culprit, he or she can still request to get a report of
+all mutations in the build processes. This would include the LLVM version, the used C compiler, the linker, the assembler, etc. 
 This way the tool can still provide some leads during performance regression analysis.
 
-Lastly, it is reasonably feasible to retrieve information from GHC's \textit{Spineless, Taggless, G-machine} (STG), which converts the functional code
-to imperative form. This process similarly takes care of some optimisations that were otherwise not possible in the Core pipeline. Whether, and if so how, 
-this telemetry can play a useful role in the tool is an avenue for future research.
+Lastly, information could be retrieved information from GHC's \textit{Spineless, Taggless, G-machine} (STG),
+which converts the functional code to imperative form.
+This process similarly takes care of some optimisations that were otherwise not possible in the Core pipeline.
+Whether, and if so how, this telemetry can play a useful role in the tool is an avenue for future research.
 
-\section{Rewrite rules and fusion}
+\section{Fusion by rewrite rules}
 
-As part of collecting past Core related performance issues we made the observation that rewrite rules were often on the usual suspects, and rightly so.
-Especially rewrite rule based fusion, either within GHC itself or as part of custom library, comes with many brittle interactions that cause failures
+As part of collecting Core related performance issues from the past, we made the observation that rewrite rules were the usual suspects, and often rightly so.
+Especially rewrite rule based fusion, either within GHC itself or as part of custom library, come with many brittle interactions that cause failures
 on specific cases are after small changes. This naturally begs the question if rewrite rules are a suitable method for implementing fusion. We believe
 research is needed to evaluate the feasibility of fusion specific transformations that rely on, and interfere less, with the simplifier.

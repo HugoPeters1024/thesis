@@ -1,12 +1,18 @@
-Straight away communicate the idea that core exploration should be easier and more approachable and give
-and drill it home with a small but daunting core snippet.
- 
-Haskell is a language explicit about side effects which allows for pretty drastic semantic preserving transformations,
-inviting programmers to hand over a lot of optimisation responsibilities. To reasure success one needs to explore
-interactions with the compiler.
+GHC -- the Haskell compiler -- uses a bespoke intermediate language upon which a number of separate optimisation transformations take place.
+From the compositional style of programming, that makes languages like Haskell so attractive, follows that optimisation is essential as to not produce
+unreasonably slow binaries.
+While generally successful, it is needed at times to inspect this intermediate representation throughout the transformations to understand
+why performance is unexpectedly disappointing or has regressed. This has historically been a task reserved for the more hardened and experienced
+Haskell developer, and is often done in a primitive manner.
+\\
 
-Generally we want our programs to not only be correct but also terminate in reasonable amount of time while
-not consuming a overly large chunk of resources. This collection of additional constraints are examples of 
-Non-functional requirements. In trying to meet these requirements, we expect an optimising compiler
-to do some of the heavy lifting. Compositional style programming like in Haskell puts even more
-faith in the compiler in this regard.
+Recent research has explored the ability to include assertions about optimisation that are expected to take place in traditional test suites.
+After all we generally want our programs to not only be correct, but also terminate in a reasonable amount of time.
+This is an exciting idea, but it does not address the need to inspect the intermediate representation itself and the skill required to do so.
+\\
+
+We believe that Core inspection can be streamlined with an interactive tool that allows users to explore and comprehend such
+intermediate programs more pleasantly and efficiently. We describe what such a tool may look and how we implemented it. Then we
+empirically evaluate our tool by reproducing a real world performance regression in the popular \mono{text} library and show how our tool
+could have been of assistance in that situation. Furthermore, we discuss how we used our tool to discover a performance bug in the fusion  
+system of contemporary GHC itself.

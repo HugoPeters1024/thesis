@@ -61,7 +61,7 @@ that compiles to Javascript \cite{elm_lang}.
 %     frontend [color=lightblue,label="🕵frontend"]
 %   }
 % }
-% 
+
 \section{Creating the GHC plugin}
 
 The least invasive option would be to parse the output of GHC given a number of \mono{-ddump} flags. However, for the sake
@@ -139,13 +139,13 @@ noise can quickly become overwhelming despite change detection.
 \section{Creating the frontend application}
 
 We begin with a brief introduction to the Elm language and its concepts. Elm is very much a domain specific language; It is 
-similar enough to Haskell to be familiar yet sufficiently simplified to be a frontend only language. It contrains the architecture
-to a trinity of concepts.
+similar enough to Haskell to be familiar yet sufficiently simplified to be a frontend only language. It constrains the architecture
+to a trinity of concepts: 
 
 \begin{itemize}
-  \item \textbf{Model} - The state of the application
-  \item \textbf{Update} - The way the state is updated: \mono{Message -> Model -> Model}
-  \item \textbf{View} - The way the state is rendered: \mono{Model -> Html}
+  \item \textbf{Model} - The state of the application.
+  \item \textbf{Message} - Typically abbreviated to \mono{Msg}, this describes all the events that can occur and are processed by the \mono{update : Msg -> Model -> Model} function.
+  \item \textbf{View} - The way the state is rendered: \mono{view: Model -> Html Msg}. The \mono{Html} type is polymorphic over the \mono{Msg} so that it can contain sound event emitters like \mono{onClick}.
 \end{itemize}
 
 The big idea is to have exclusively \textit{pure} and \textit{complete} functions to handle viewing and updates.
@@ -179,7 +179,9 @@ view model =
 \end{minted}
 \end{listing}
 
-Unlike Haskell, the lack of explicit IO means that it feels justified to disallow any form of errors and by extent incomplete functions.
+Unlike Haskell, there is no explicit \mono{IO} in user code. All side effects are encapsulated by the framework, typically in the form of a function
+that takes a \mono{Msg} constructor and populates it with a \mono{Result x a} value for failure handling.
+Given this situation it feels justified to disallow any form of errors and by extent incomplete functions.
 This powerful property gives us great confidence in the robustness of our application.
 
 \subsection{Reproducing the AST}
@@ -193,9 +195,9 @@ For example the \mono{Alt} datatype (i.e. an arm of a case expression) is define
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
 data Alt = Alt
-    { altCon :: AltCon
-    , altBinders :: [Binder]
-    , altRHS :: Expr
+    { altCon :: AltCon         -- The constructor being matched on
+    , altBinders :: [Binder]   -- The variables being bound during the deconstruction
+    , altRHS :: Expr           -- The right-hand side of the case arm
     }
     deriving (Generic)
 
@@ -210,7 +212,7 @@ deriving via AltElm instance HasElmDecoder Aeson.Value Alt
 
 Note how we derive the \mono{Aeson.ToJSON} instance via the \mono{ElmType} machinery. This control allows
 us to generate a compatible and robust JSON parser for Elm. The auto-generated Elm datatype and parser
-(decoder in Elm speak) look like this:
+(\mono{Decoder} in Elm speak) look like this:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{elm}
@@ -244,18 +246,22 @@ type BinderThunk = Found Binder | NotFound | Untouched
 Initially this field is set to the \mono{Untouched} variant. Once the finitely encoded AST is decoded into the 
 Elm universe, a reconstruction traversal takes place that, with the help of an environment, strengthens the 
 \mono{BinderThunk} with a reference to its binder. The \mono{NotFound} variant exits purely for verification purposes
-and should never occur with sound inputs. It is also important to note that Elm's single static assignment
-semantics naturally implies that the \mono{Binder} is never copied, but only referenced.
+and should never occur with sound inputs. At this time, the unfoldings of binders are not yet considered, breaking the 
+infinite recursion problem. This important because unlike Haskell Elm is strict, the reconstruction would thus never
+terminate on an infinite datatype. In the future, it is conceivable to run an on demand reconstruction as Elm. Furthermore,
+the reconstruction pass does not significantly increase memory usage as Elm's single static assignment semantics dictate that
+the fields contained in a \mono{BinderThunk} are references not copies.
 
 After this initial reconstruct we again no longer need to keep binding semantics in mind, and we can isolate
-subexpressions without explicit environments.
+subexpressions without losing information about the binding site of now seemingly free variables.
 
 \subsection{Pretty printing}
 
 It certainly should be considered useful to display the Core in exactly the same way that
 GHC does. After all, this is what programmers are currently already used to and its design
 has been given a lot of thought. However, we felt a need to first create a separate representation
-that is tailored to those who have not seen Core before.
+that is tailored to those who have not seen Core before. We discuss the pros and cons of this decision
+more extensively in \cref{section:discussion:printing}.
 
 Haskell programmers that care enough to inspect the interaction with the compiler are likely to be
 avid readers of at least basic Haskell syntax. Therefore, we decided to create a pretty printer that attempts
@@ -288,9 +294,21 @@ quicksort a $dOrd ds = case ds of
 \end{listing}
 
 Notice that although this might look like normal Haskell, it contains explicit type variables like
-\mono{a}, hinting at the SystemFC nature of Core. 
+\mono{a}, hinting at the SystemFC nature of Core. Furthermore, operators application are written in 
+Polish notation, that is the operator comes before its arguments. We decided this to be more sensical because the type
+values muddy the waters when it comes to the clarity of infix notation, note this alternative form:
 
-To facilitate syntax hightlighting, the pretty printer adds the appropriate token identifiers such that 
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+-- Polish notation
+\ds -> GHC.Classes.> @a $dOrd ds x) xs))
+
+-- Infix notation
+\ds -> ds (GHC.Classes.> @a $dOrd) x) xs))
+\end{minted}
+\end{listing}
+
+To facilitate syntax highlighting, the pretty printer adds the appropriate token identifiers such that 
 \mono{pygments} \cite{pygments} can be used to colorize the output.
 
 
@@ -380,12 +398,24 @@ We were able to overcome this problem using the \mono{Html.Lazy} module. which t
 separately. If on some update the arguments have not changed, the closure is not evaluated and a cached result is returned. Regardless,
 the aforementioned diffing still takes place, reducing the cost of the update to something negligible. Of course, we cannot get around the fact that
 any updates that do affect the output of the pretty printer might still cause some stutters, but the frequency of such updates is 
-generally far lower.
+generally far lower. A dataflow diagram is shown in \cref{fig:elm_cache}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{figs/elm_cache.png}
+  \caption{A graph showing the logic behind the caching mechanism.}
+  \label{fig:elm_cache}
+\end{figure}
+
+Elegantly, because \mono{f} is guaranteed to be pure, the cache is guaranteed to always return the same value as the evaluation would have.
 
 \subsection{Note on deployment}
 
-By virtue of being solely a stateless HTML + JavaScript application after compilation, means that the frontend can
+By virtue of being solely a stateless Html/JS application after compilation, means that the frontend can
 easily and cheaply be deployed to any static file hosting service. Because the dump files are never send to the server,
 we can discard any privacy concerns while still providing a no effort method to analyze the dumps. Anyone is still free
 of course, to build and host their own build of the frontend which is similarly open sourced.
+
+Currently some CSS files are served from a CDN but it would be trivial to bundle them with the application, making even
+an internet connection no longer a requirement.
 
