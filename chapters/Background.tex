@@ -8,7 +8,7 @@ GHC recognises three distinct stages of the compilation process \cite{haskell_op
 \begin{enumerate}
   \item \textbf{Frontend}, parsing and type checking, enables to give clear errors that reference the unaltered source code.
   \item \textbf{Middle}, a number of optimisation transformations.
-  \item \textbf{Backend}, generates and compiles to machine code, either via C-- or LLVM.
+  \item \textbf{Backend}, generates and compiles to machine code, either via \mono{C--} or \mono{LLVM}.
 \end{enumerate}
 
 The middle section is tasked with doing all the optimisation work it can, leaving only those optimisations to the backend
@@ -18,12 +18,12 @@ the types are preserved throughout the middle section, it can be verified that e
 Providing some evidence towards the correctness of the transformation.
 
 Regardless, the Haskell source language itself is not a good target for optimisation. The source has to be
-rich and expressive, which yields an AST datatype of over 100 constructors. Any transformation over such a datatype has far too
+rich and expressive, requiring an AST datatype with of over 100 constructors. Any transformation over such a datatype has far too
 many cases to be considered practical to implement; Not to mention the myriad of bug-inducing edge cases. To overcome this issue, the
-middle section first performs a desugaring pass, translating the source language into a far simpler intermediate language
-called \textit{Core}. 
+middle section first performs a desugaring pass, translating the source language into a far simpler -- but expressively equivalent -- 
+intermediate language called \textit{Core}. 
 
-Core --- which is how we will refer to GHC intermediate representation going forward --- is designed to be as simple as possible
+Core -- which is how we will refer to GHC intermediate representation going forward -- is designed to be as simple as possible
 without being impractical. A testament to that property is the fact that we can fit the entire definition on the page:
 
 \begin{listing}[H]
@@ -48,7 +48,8 @@ data Bind
   
 -- the Var type contains information about
 -- a variable, like it's name, a unique identifier
--- and analysis results
+-- and analysis results. Binders, Variables, Ids are
+-- all the same thing in different contexts
 type Bndr = Id
 type Id = Var
 
@@ -73,8 +74,9 @@ Lastly, we zoom in on the analysis results stored in the \mono{Var} type.
 \subsection{The simplifier: its parts}
 
 The simplifier is quite literally an indispensable part of the transformation pipeline. Although the parts of the pipeline
-are meant to be separable entities, they heavily rely on the simplifier to deal with the cleanup. As such, it has earned
-itself the reputation of being the workhorse of the pipeline \cite{ghc_wiki_core2core}.
+are meant to be separable entities, they heavily rely on the simplifier to deal with the shape the cleanup some of the mess beforehand as
+well as after.
+As such, it has earned itself the reputation of being the workhorse of the pipeline \cite{ghc_wiki_core2core}.
 
 If you were looking for an atom, you have not found it. The simplifier is in itself again a collection of smaller transformations,
 albeit applied repeatedly and interleaved such that they cannot be easily untangled. Each simplifier subpart is a local transformation,
@@ -82,7 +84,7 @@ that is, it only looks at the immediate surroundings of the expression. We give 
 \cite{ghc_wiki_core2core}
 
 \subsubsection{Constant Folding}
-Evaluate expressions that require no runtime information. This is a very logical transformation that does not
+Evaluate expressions that can be evaluated in compile time. This is a very logical transformation that does not
 require any further considerations.
 
 \begin{listing}[H]
@@ -97,11 +99,12 @@ require any further considerations.
 \subsubsection{Inlining}
 \label{section:background:inlining}
 
-Inlining function calls is a well known performance enhancing operation in all language, but especially so in functional ones.
+Inlining, replacing calls to functions with the body of that function, is a well known performance enhancing operation in most languages,
+but especially so in functional ones.
 The difference is staggering with a around 10-15\% performance increase for conventional languages, as opposed to
 30-40\% for functional languages \cite{haskell_optimisations_1997}.
 
-Unlike constant folding, it is not an ad-hoc no-brainer. An easy case would be to inline a function that is
+Unlike constant folding, it is not an ad-hoc no-brainer. An obvious good case would be to inline a function that is
 used exactly once. All that this does is remove the veil that hides the function body for further optimisations:
 
 \begin{listing}[H]
@@ -115,19 +118,19 @@ f 3
 \end{listing}
 
 However, if the function is used in multiple locations with different arguments, you risk increasing the size of the program
-because the function body will be duplicated at each call-site. This is a trade-off that --- although often worth it --- must be
-considered on a case to case basis. GHC has a number of heuristics to determine whether inlining is worth it or not. \cite{secrets_of_the_inliner}
+because the function body will be duplicated at each call-site. This is a trade-off that -- although often worth it -- must be
+considered on a case to case basis. GHC has a number of heuristics to determine whether inlining should occurs or not \cite{secrets_of_the_inliner}.
 Obviously, this cannot be a perfect solution and one can imagine how a small change in the code can suddenly cause the inliner to reverse
-its decision; a testament to the non-continuous nature of the compiler.
+its decision; a testament to the non-continuous nature of the compiler with respect to the input program.
 
-Besides inlining function calls, Haskell's let bindings also form an opportunity for inlining.
+Besides inlining function calls, Haskell's let-bindings also form an opportunity for inlining.
 After all, let bindings are often described as syntax sugar for lambda abstractions, but there is an important difference to be considered.
-Because let bindings in Haskell are lazily evaluated, it may lead to explosion if the let bound variable is used in a lambda
+Because let bindings in Haskell are lazily evaluated, it may lead to explosion of work if the let bound variable is used in a lambda
 expression. For example:
 
 \begin{listing}[H]
 \begin{minted}{haskell}
--- before, 'expensive' is called at most once
+-- before, the function 'expensive' is called at most once
 let v = expensive 42
     l = \x -> ... v ...
 in map l xs
@@ -142,8 +145,8 @@ In this case, inlining would be disastrous for performance and GHC will take gre
 
 \subsubsection{Case of known constructor}
 
-The case destruction is only the way to get to the WHNF of an expression. This means that inside of a case expression
-we have learned information about the variable under scrutiny and can use it to infer the result of outer case expressions.
+The case destruction is only the way to get to the Weak-Head-Normal-Form (WHNF) of an expression.
+This means that inside of a case expression we have learned information about the variable under scrutiny and can use it to infer the result of outer case expressions.
 Consider the following scenario:
 
 \begin{listing}[H]
@@ -168,8 +171,8 @@ safe_tail ls = case ls of
 \end{minted}
 \end{listing}
 
-Since we scrutinize \mono{ls} again in the inner case, we actually already know that the second case is only ever called,
-thus we can eliminate the case expression as a whole.
+Since we scrutinize \mono{ls} again in the inner case, we actually already know ls is not the empty list, so we can safely
+replace the inner case with the body of the case expression:
 
 \begin{listing}[H]
 \begin{minted}{haskell}
@@ -184,8 +187,8 @@ The removal of the call \mono{error} during this process is a testament to this 
 
 \subsubsection{Case of case}
 
-There are cases (no pun intended) where the case-of-know-constructor cannot quite do its job, although it is obvious
-that benefits are still to be gained. Consider for example what happens when instead of scrutinizing the same variable,
+There are cases (no pun intended) where the case-of-known-constructor cannot quite do its job, although it is obvious
+that benefits are yet to be gained. Consider for example what happens when instead of scrutinizing the same variable,
 the outer case scrutinizes the result of the innner case:
 
 
@@ -220,15 +223,16 @@ case x of
 \end{minted}
 \end{listing}
 
-Note that we do risk duplicating \mono{E1} and \mono{E2} if the expression does not reduce so completely.
-A solution to this are \textit{join points} \cite{compiling_wo_continuations},
+Note that we do risk duplicating \mono{E1} and \mono{E2}, which could have been problematic if the expression
+which contained them did not reduce so completely.
+A solution to this problem are \textit{join points} \cite{compiling_wo_continuations},
 which we will not go into here for the sake of brevity.
 
 \subsubsection{Rewrite rules}
 
-We already discussed in \cref{section:introduction:rewrite_rules} how rewrite rules are way to express domain
-specific knowledge to the compiler that it otherwise can not practically infer. Applying given rewrite rules is task
-also given to the simplifier. It should now be clear that this process can get a little messy since the simplifier
+We already discussed in \cref{section:introduction:rewrite_rules} how rewrite rules are a way to express domain
+specific knowledge to the compiler that it otherwise can not practically infer. Applying given rewrite rules is a task
+also reserved for the simplifier. It should now be clear that this process can get a little messy since the simplifier
 is under no obligation to apply the rules, nor its other tasks, in any particular order. We will get into this issue
 more in the next section where we discuss the simplifier at large.
 
@@ -236,18 +240,14 @@ It should be noted that the use of rewrite rules are very common during the comp
 This is because the internal fusion system on list operations are implemented as built in rewrite rules.
 We discuss this system more in depth in \cref{section:background:fusion}.
 
-
-
 \subsection{The simplifier: its sum}
 
-An attentive reader might have noticed that when explaining one part of the simplifier, we often relied on another to
-its job. This begs the question: how does the simplifier determine in which order to run its subparts. The answer to that is
-that it does not. The analogy here is that a compiler is a gun and a program is a target. Every program is very different
-and we cannot know in advance how to best hit it. Therefore, we must ensure that the compiler --- or this case the simplifier stage ---
+An attentive reader may have noticed that when explaining one part of the simplifier, we often relied on another to do
+its job. This begs the question: how does the simplifier determine in which order to run its subparts? The answer to that is
+that it does not. The analogy here is that a compiler is a gun and a program is a target. Every program is very different,
+and we cannot know in advance how to best hit it. Therefore, we must ensure that the compiler -- or this case the simplifier stage --
 has a lot of bullets in its gun to ensure being able to effectively hit a lot of targets \cite{haskell_optimisations_1997}.
-
-A secondary problem with this approach is that one simplifier part may enable another to its job after. Running the simplifier
-once is therefore not satisfactory, and we must run it until it reaches a sort of \textit{fixed point}; At least up until some
+Running the simplifier once is therefore not satisfactory, and we must run it until it reaches a sort of \textit{fixed point}; At least up until some
 arbitrary limit since there is no guarantee such a fixed point exists and even if it does that we find it and not get stuck in a loop.
 
 Aforementioned looping behavior can actually occur quite easily due to certain rewrite rules. It is not always the case that
@@ -257,14 +257,14 @@ to apply the reverse rewrite rule later. This is obviously problematic as we can
 To overcome that issue one can enable/disable rewrites rules in certain phases of simplifier. To understand this we must first
 understand when the simplifier is run.
 
-In order, the simplifier is --- rather unintuitively --- interspersed between other transformations as follows:
+In order, the simplifier is -- rather unintuitively -- interspersed between other transformations as follows:
 
 \begin{enumerate}
   \item \textbf{Gentle} (disables case-of-case transformations)
   \item \textbf{Phase 2}
   \item \textbf{Phase 1}
   \item \textbf{Phase 0}
-  \item \textbf{Final}
+  \item \textbf{Final} (is run multiple times throughout the transformations after phase 0)
 \end{enumerate}
 
 By default, rewrite rules as well as inlinings can occur in each of these phases but the programmer does have the ability
@@ -287,7 +287,7 @@ compareLength t c = S.compareLengthI (stream t) c
 \end{minted}
 \end{listing}
 
-Here phase control is used to indicate that \mono{compareLength} should \textbf{only} be inlined in phase 1 and conversely
+Here phase control is used to indicate that \mono{compareLength} should \textbf{only} be inlined from phase 1 onward and conversely
 that the rewrite rule \textbf{compareN/length} may be applied \textbf{except} in phase 1. What this ensures is that the inliner
 will not operate on the result of the rewrite rule directly in the same phase. This is supposedly because we expect \mono{compareLength}
 to occur in the LHS of a different rewrite rule which is to be desired over inlining at first.
@@ -295,9 +295,9 @@ to occur in the LHS of a different rewrite rule which is to be desired over inli
 \subsection{The worker/wrapper transformation}
 \label{section:background:worker_wrapper}
 
-The \textit{worker/wrapper} transformation is able to change the type of computation (typically a loop) into a \textit{worker} function
+The \textit{worker/wrapper} transformation is able to change the type of a computation (typically a loop) into a \textit{worker} function
 along with a \textit{wrapper} that can convert back to the original type. The example listed on the GHC wiki is that of the reverse
-function on lists \cite{ghc_wiki_wwrapper}. One might concisely define with direct recursion and the \mono{++} operator:
+function on lists \cite{ghc_wiki_wwrapper}. One might concisely define \mono{reverse} with direct recursion and the \mono{++} operator:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -307,7 +307,7 @@ reverse (x:xs) = reverse xs ++ [x]
 \end{minted}
 \end{listing}
 
-Of course this is not very efficient as the \mono{++} operator itself is already linear, make the reverse function quadratic; If we
+Of course this is not very efficient as the \mono{++} operator itself is already linear, making the reverse function quadratic; If we
 create an auxiliary \textbf{worker} function \mono{reverse'} that takes an extra accumulator argument, we can create a linear version:
 
 \begin{listing}[H]
@@ -323,9 +323,9 @@ Here the \textbf{wrapper} is simply applying the empty list as a starting argume
 that exists only during the lifetime of the computation, the function has become asymptotically more efficient.
 
 Impressively, the transformation may also greatly improve the constant factor of the runtime by leveraging unboxed types.
-Unlike strict languages, the \mono{Int} type in Haskell --- while always representing a 64 bit integer --- is not statically sized.
-After all, any value is lazy and may therefore still be unevaluated thunk whose size is unknown at compile time. As a result, \mono{Int}s
-are always stored on the heap and thus require runtime allocation. However, \mono{Int} has a strict counterpart \mono{Int#} (unboxed integer)
+Unlike strict languages, the \mono{Int} type in Haskell -- despite always evaluating to a 64 bit integer -- is itself not statically sized.
+After all, any value is lazy and may therefore still be an unevaluated thunk whose size is unknown at compile time. As a result, \mono{Int}s
+are always stored on the heap and thus require no runtime allocation. However, \mono{Int} has a strict counterpart \mono{Int#} (unboxed integer)
 in which it is defined: \hs{data Int = I# Int#}. Computations on \mono{Int#}s can be evaluated much more cheaply since such values can be
 stored on the stack.
 
@@ -342,9 +342,8 @@ triangular n = n + triangular (n-1)
 \end{listing}
 
 Although an all-knowing compiler could have determined that the result of \mono{triangular} can simply be calculated numerically in constant time as $\frac{n^2 + n}{2}$,
-we can still trust GHC to infer an important property about the function using strictness analysis. Namely: \mono{triangular} does not produce any intermediate results that can
-used without evaluating the whole of \mono{triangular}. That is: if you are willing to spent any amount of time on \mono{triangular}, you might as well calculate the whole thing.
-Thus GHC decides to rewrite the function using a strict worker, removing the need for many dubious allocations:
+we can still trust GHC to infer an important property about the function using strictness analysis. Namely: \mono{triangular} does not produce any intermediate results that can be used without evaluating the whole of \mono{triangular}. That is: if you are willing to spent any amount of time on \mono{triangular}, you might as well calculate the whole thing.
+Thus, GHC decides to rewrite the function using a strict worker, removing the need for many dubious allocations:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -366,7 +365,8 @@ To get a feeling for the difference in performance, we can compare the runtime o
 \mono{original} & 0,10s user 0,03s system 99\% cpu 0,132 total \\
 \mono{transformed} & 0,01s user 0,01s system 98\% cpu 0,023 total \\
 \end{tabular}
-\caption{The runtime of both version of \mono{triangular}. We can see that the worker/wrapper tranformation has increased runtime performance by a significant factor.}
+\caption{The runtime of both version of \mono{triangular}. We can see that the worker/wrapper tranformation has increased runtime performance by a factor of 
+$0.132/0.023 = 5.7$.}
 \end{table}
 
 It might not be immediately intuitive why the performance differs so drastically and where exactly these seemingly evil allocation occur.
@@ -473,12 +473,12 @@ Currently, the best resource for decoding this would be to read the comments in 
 \section{The fusion system}
 \label{section:background:fusion}
 
-Fusion --- the process of combining multiple operations over a structure into a single operation --- is in GHC
-implemented using the \textit{build/foldr} idiom. This system was developed as an improvement on deforestation 
-(Waddler \cite{WADLER1990231}) which has shortcomings when it comes to recursive functions \cite{shortcut_fusion}.
+Fusion -- the process of combining multiple operations over a structure into a single operation -- is in GHC
+implemented using the \textit{build/foldr} idiom, coined as \textit{short-cut fusion}. This system was developed as an improvement on deforestation 
+(Wadler \cite{WADLER1990231}) which has shortcomings when it comes to recursive functions \cite{shortcut_fusion}.
 
 We borrow an example from Seo \cite{shortcut_fusion_blog} to illustrate how the build/foldr system works. Consider
-the example --- coincidentally very similar to \mono{triangular} (\cref{section:background:worker_wrapper}) --- of
+the example -- coincidentally very similar to \mono{triangular} (\cref{section:background:worker_wrapper}) -- of
 summing a list of numbers:
 
 \begin{listing}[H]
@@ -836,14 +836,15 @@ Unless you know exactly what to search for, this begs for a more ergonomic, filt
 
 \subsubsection{GHC Plugins}
 
-GHC --- being also a playground for academics and enthusiasts alike --- is extremely flexible when it comes to
+GHC -- being a playground for academics and enthusiasts alike -- is extremely flexible when it comes to
 altering its functionality. Using the now well established plugin interface, one is able to hook into almost
 any operation of the front- and midsection of the compiler. One such place is managing the core2core passes that
-will be run on the current module. This point of customization can be used to intersperse each core2core pass with an
-identity transformation that smuggles away a copy of the AST in its full form.
+will be run on the current module. This point of entry can be used to intersperse each core2core pass with an
+identity transformation that smuggles away a copy of the AST in its full form as a side effect.
 
 One such existing plugin is \mono{ghc-dump} \cite{ghc_dump}. Besides extracting intermediate ASTs, it defines an
-auxiliary Core definition to which it provides a GHC version agnostic mapping. This has the increased benefit of 
+auxiliary Core definition to which it provides a GHC version agnostic conversion. This has the increased benefit of 
 being able to directly compare snapshots from different GHC versions; A not uncommon task as discussed in \cref{section:communicating_core}.
 And while certainly being an improvement over plain text representation, we believe exploring and comparing such
 dumps requires a more rich interface.
+

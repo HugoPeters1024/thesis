@@ -8,16 +8,16 @@ of the architecture and then zoom in on all the technical design decisions made 
 The following prime requirements are identified to guide the implementation process.
 
 \begin{itemize}
-  \item \textbf{GHC $\geq$ 8.4 cross compatible} - Important to facilitate inspecting the effects of changes in the compiler on the same source.
-  \item \textbf{Simple and non invase steps to create dumps} - Large and established code bases should be able to use the tool.
-  \item \textbf{Cross-platform ability to explore dumps} - The tool should be able to run on all major platforms, preferably without any additional dependencies.
-  \item \textbf{Extendable} Not everything needs to be supported (think unfoldings) but should be extendable in the future.
+  \item \textbf{GHC $\geq$ 8.4 cross compatible}, Important to facilitate inspecting the effects of changes in the compiler on the same source.
+  \item \textbf{Simple and non invase steps to create dumps}, Large and established code bases should be able to use the tool.
+  \item \textbf{Cross-platform ability to explore dumps}, The tool should be able to run on all major platforms, preferably without any additional dependencies.
+  \item \textbf{Extendable}, Not everything needs to be supported (think unfoldings) but should be extendable in the future.
 \end{itemize}
 
 \section{Architecture}
 
 We envisioned a high degree of interactability with the snapshots of the intermediate ASTs. To realise this
-in a cross-platform, dependency-free, fashion, we decided to use a browser based frontend application. 
+in a cross-platform, dependency-free fashion, we decided to use a browser based frontend application. 
 Because the concept of mutually recursive algebraic datatypes are very pervasive in the Core AST, we felt it would be 
 extremely helpful if the frontend language had first class support for this. This quite naturally led to us to Elm, a functional language
 that compiles to Javascript \cite{elm_lang}.
@@ -66,8 +66,8 @@ that compiles to Javascript \cite{elm_lang}.
 
 The least invasive option would be to parse the output of GHC given a number of \mono{-ddump} flags. However, for the sake
 of convenience and robustness, we instead decided to create a plugin that hook directly into the core2core pipeline and
-capture the ASTs completely has original value. By interspersing each transformation with snapshot action we have as much information
-as we could reasonably hope for.
+capture the ASTs completely. By interspersing each transformation with a snapshot action, we extract as much information
+from GHC as we could reasonably hope for.
 
 \subsection{Capturing the information}
 \label{section:methods:capturing_info}
@@ -79,9 +79,10 @@ which already implemented such a representation as well as a version agnostic co
 macro statements \cite{ghc_dump}. 
 
 What \mono{ghc-dump} also intelligently addresses, is the issue of possible infinite recursion.
-This problem arises through the \mono{IdInfo} struct attached to each variable such that the inliner
-knows the body of variable when it wishes to inline the variable. However, when a variable represents a recursive ---
-or even mutually recursive --- value, the inlining will contain itself. This fact implies that we can never serialise 
+This problem arises through the unfolding inside the \mono{IdInfo} struct attached to each variable. This effectively
+makes any Core expression closed as the binding information is stored in the variable itself, to great utility of the inliner.
+However, when a variable represents a recursive --
+or even mutually recursive -- value, the inlining will contain itself. This fact implies that we can never serialise 
 the AST to a finite value. Therefore, \mono{ghc-dump} demotes each usage site of a variable to an identifier referencing its binding site.
 This allows us to obtaining a finite representation that we can later reconstruct by traversing
 the AST with an environment.
@@ -145,11 +146,12 @@ to a trinity of concepts:
 \begin{itemize}
   \item \textbf{Model} - The state of the application.
   \item \textbf{Message} - Typically abbreviated to \mono{Msg}, this describes all the events that can occur and are processed by the \mono{update : Msg -> Model -> Model} function.
-  \item \textbf{View} - The way the state is rendered: \mono{view: Model -> Html Msg}. The \mono{Html} type is polymorphic over the \mono{Msg} so that it can contain sound event emitters like \mono{onClick}.
+  \item \textbf{View} - The way the state is rendered: \mono{view: Model -> Html Msg}. The \mono{Html} type is parameterized over the \mono{Msg} 
+    such that it event emitters like \mono{onClick} can only produce \mono{Msg}s that are handled by \mono{update}.
 \end{itemize}
 
 The big idea is to have exclusively \textit{pure} and \textit{complete} functions to handle viewing and updates.
-These updates are triggered by so-called ``messages'' that are the result of user interaction like hovering, clicking, etc.
+These updates are triggered by emitted \mono{Msg}s that are the result of user interaction like hovering, clicking, etc.
 The increment/decrement example is a testament to the simplicity focused design of the language \cite{elm_lang}:
 
 \begin{listing}[H]
@@ -188,9 +190,9 @@ This powerful property gives us great confidence in the robustness of our applic
 
 It would have been extremely tedious to have to constantly maintain a Core ADT in Elm along with a JSON
 parser that is compatible with the JSON output of the Haskell plugin. Luckily, we were able to use the
-\mono{haskell-to-elm} \cite{haskell_to_elm} package to automatically derive all the required boilerplate code.
+\mono{haskell-to-elm} \cite{haskell_to_elm} package to automatically generate all the required boilerplate code.
 
-For example the \mono{Alt} datatype (i.e. an arm of a case expression) is defined as follows in our AST:
+For example the \mono{Alt} datatype --  representing an arm of a case expression -- is defined as follows in our AST:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -252,7 +254,7 @@ terminate on an infinite datatype. In the future, it is conceivable to run an on
 the reconstruction pass does not significantly increase memory usage as Elm's single static assignment semantics dictate that
 the fields contained in a \mono{BinderThunk} are references not copies.
 
-After this initial reconstruct we again no longer need to keep binding semantics in mind, and we can isolate
+After this initial reconstruction we again no longer need to keep binding semantics in mind, and we can isolate
 subexpressions without losing information about the binding site of now seemingly free variables.
 
 \subsection{Pretty printing}
@@ -264,12 +266,13 @@ that is tailored to those who have not seen Core before. We discuss the pros and
 more extensively in \cref{section:discussion:printing}.
 
 Haskell programmers that care enough to inspect the interaction with the compiler are likely to be
-avid readers of at least basic Haskell syntax. Therefore, we decided to create a pretty printer that attempts
-to be as similar to Haskell source as possible. Just like GHC, we used pretty printing the method developed 
-by Wadler \cite{prettier_printer}, implemented in Elm using \mono{elm-pretty-printer} \cite{prettier_printer_elm}.
-We believe that such a representation is a suitable way to minimize the shock reactions in newcomers, as well as
+avid readers of at least basic Haskell syntax. We believe that such a representation is a suitable way to minimize the shock reactions in newcomers, as well as
 provide a more comfortable viewing experience for those who are primarily interested in the structure of their program
 throughout optimisation.
+Therefore, we decided to create a pretty printer that attempts
+to be as similar to Haskell source as possible. Just like GHC, we used the pretty printing method developed 
+by Wadler \cite{prettier_printer}, implemented in Elm using \mono{elm-pretty-printer} \cite{prettier_printer_elm}.
+
 
 To compare, consider again the Core representation presented in \cref{section:background:ghc} with the quicksort
 representation produced by our pretty printer:
@@ -301,10 +304,10 @@ values muddy the waters when it comes to the clarity of infix notation, note thi
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
 -- Polish notation
-\ds -> GHC.Classes.> @a $dOrd ds x) xs))
+\ds -> GHC.Classes.> @a $dOrd ds x
 
 -- Infix notation
-\ds -> ds (GHC.Classes.> @a $dOrd) x) xs))
+\ds -> ds (GHC.Classes.> @a $dOrd) x
 \end{minted}
 \end{listing}
 
@@ -387,15 +390,15 @@ a number of interactive features. These include:
 
 \subsection{Improving performance with cache semantics}
 
-The way that Elm operates --- like many other interactive browser based applications --- is by rendering the HTML on every
+The way that Elm operates -- like many other interactive browser based applications -- is by rendering the HTML on every
 update and then diffing the result with the current state of the DOM to create a minimal change list. This is generally a very
 good strategy because mutating the DOM is by far the most dominant cost contributor. However, when it comes to pretty printing a
-large Core expression the \mono{view} function starts to incur a significant cost. This is wasteful because many updates do not
+large Core expression, the \mono{view} function starts to incur a significant cost. This is wasteful because many updates do not
 actually affect the output of the pretty printer (events like \mono{onHover} and \mono{onClick} for example).
 Initially this led to some serious usability issues where the application would stutter and freeze.
 
 We were able to overcome this problem using the \mono{Html.Lazy} module. which takes some HTML producing closure and its arguments
-separately. If on some update the arguments have not changed, the closure is not evaluated and a cached result is returned. Regardless,
+separately. If on some update the arguments have not changed compared to the last update, the closure is not evaluated and a cached result is returned. Regardless,
 the aforementioned diffing still takes place, reducing the cost of the update to something negligible. Of course, we cannot get around the fact that
 any updates that do affect the output of the pretty printer might still cause some stutters, but the frequency of such updates is 
 generally far lower. A dataflow diagram is shown in \cref{fig:elm_cache}.
@@ -411,7 +414,7 @@ Elegantly, because \mono{f} is guaranteed to be pure, the cache is guaranteed to
 
 \subsection{Note on deployment}
 
-By virtue of being solely a stateless Html/JS application after compilation, means that the frontend can
+By virtue of being compiled to solely a stateless Html/JS application, the frontend can
 easily and cheaply be deployed to any static file hosting service. Because the dump files are never send to the server,
 we can discard any privacy concerns while still providing a no effort method to analyze the dumps. Anyone is still free
 of course, to build and host their own build of the frontend which is similarly open sourced.

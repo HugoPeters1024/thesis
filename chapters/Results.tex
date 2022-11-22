@@ -1,20 +1,20 @@
 \chapter{Results}
 
-We evaluate our tool by describing a number of real world cases where we were able to use our tool.
+We evaluate our tool by applying it to a number of real world cases.
 Firstly we reproduce the issue underlying the work of \mono{inspection-testing} \cite{inspection_testing}, which
 also serves as a comprehensive, didactic example of how to use our tool.
 The second case study is about stream fusion and focuses on the way that the theory differs from the true implementation.
-In doing so, it covers a large spectrum of the optimisation pipeline.
+In doing so, it covers a large spectrum of GHC's optimisation pipeline.
 Thirdly, we present how we were able to use our tool to find a performance bug in GHC itself and how we were furthermore
-able to use it to evaluate a possible solution.
+able to use it to verify a possible solution.
 Finally, we compare our experience with the tool with that of using the existing output that can
 be obtained from GHC today.
 
 \section{Diagnosing a failing inspection test in \mono{Text}}
 
 Hearkening back to \mono{inspection-testing} discussed in \cref{section:introduction_inspection_testing}, we put
-ourselves in the shoes of a programmer who gets surprised by a failing inspection test and reason how we might
-employ HsComprehension to diagnose the problem. 
+ourselves in the shoes of a programmer who gets surprised by a failing inspection test and reason how the tool may
+be employed to diagnose the problem. 
 
 To summarize, we expected that the function \mono{countChars} -- which counts the number of characters in a \mono{ByteString}
 by composing three functions in the \mono{Text} library -- will in its final form not actually construct a \mono{Text} value.
@@ -57,7 +57,7 @@ artifact.
 \paragraph{2. Creating a capture}
 
 Because we only want to create a capture of this module, we can use an exported TemplateHaskell primitive
-that registers the plugin for the current module only by simply adding the \mono{dumpThisModule} snippet 
+that registers the plugin for the current module only by simply adding the \mono{dumpThisModule} slice 
 anywhere at the top level: 
 
 \begin{listing}[H]
@@ -94,7 +94,7 @@ produced.
 
 We then click the green arrow to reference the capture in the staging area. Here we could elect to stage more
 than one capture if we want to compare them. In this case we are only interested in the current situation, and so we
-just open a single panel tab with this single capture
+just open a single panel tab with this single capture.
 
 
 \begin{figure}[H]
@@ -109,7 +109,7 @@ Core in the desugared stage (so without any transformations yet applied). Scroll
 the intermediate Core ASTs that were produced by the compiler. Whenever rewrite rules are fired they are included
 as comments at the top of the module.
 
-As you can see, the desugaring process has produced another top-level definition, namely \$\mono{trModule}. Since we
+As you can see, the desugaring process has produced another top-level definition, namely \$\mono{trModule}. Since we do
 not care for anything but our \mono{countChars} function at this time, we can elect to filter out all other definitions,
 including those that will be generated in the future: 
 
@@ -214,7 +214,7 @@ the patched version uses a variant that operates directly on streams:
 \includegraphics[width=0.8\textwidth]{figs/countchars_7.png}
 \end{figure}
 
-Given that in the previous in pass the captures were identical, and since no rewrite rule fired regarding \mono{length},
+Given that in the previous pass the captures were identical, and since no rewrite rule fired regarding \mono{length},
 we can ascribe the difference to the inlining of \mono{length}. If we collect the definition of \mono{length} from both versions
 of the text library we get:
 
@@ -255,7 +255,7 @@ unstream . S.tail . S.tail . stream
 \end{minted}
 \end{listing}
 
-By constructing a stream we have become committed to traversing the entire structure where it was not needed at first,
+By constructing a stream we have become committed to traversing the entire structure (in \mono{unstream}) where it was not needed at first,
 yielding an $O(n)$ time and memory version after ``optimisation''. This is different from the situation in \mono{countChars},
 where UTF-16 already dictated $O(n)$ runtime.
 
@@ -265,7 +265,8 @@ Frequent \mono{text} contributor, Oleg Grenrus, remarked the following on the pr
 \textit{``I think this is the right thing to do. Implicit fusion is unpredictable, and you explain, doesn't even work in simple cases.''}
 
 Instead, users can now opt in by using the stream variant of such functions explicitly. This is a tragic example of how optimisation
-can be unpredictable, and by extent, how people would favour predictability over automatic performance transformations that risk making the program slower.
+can be unpredictable, and by extent, how people would favour predictability over automatic performance transformations that
+risk making the program slower in some cases.
 
 \section{Lists vs Streams}
 
@@ -314,8 +315,7 @@ unstream (Stream next s) = go s
 \end{minted}
 \end{listing}
 
-One could describe a stream as a stateful generator function. In the case of \mono{stream} the state is a list, 
-and in the case of \mono{unstream} the state is itself a stream. In the later case you could see the state as a continuation function.
+One could describe a stream as a stateful generator function. This is actually quite similar to the concept of an iterator.
 
 Why would we want to introduce this rather complex type? The answer is that it allows us to write functions over streams that are
 non-recursive and therefore be fused by already existing optimisations like inlining and the worker/wrapper transformation. But before
@@ -364,7 +364,7 @@ halves = map (*2) . filter even
 \end{minted}
 \end{listing}
 
-We already know how GHC's shortcut fusion will treat this function, so let us assume we are now using the stream fusion variants instead
+We already know how GHC's short-cut fusion will treat this function, so let us assume we are now using the stream fusion variants instead
 and that we have convinced GHC to inline these definitions:
 
 \begin{listing}[H]
@@ -374,7 +374,7 @@ halves = unstream . map_s (*2) . stream . unstream . filter_s even . stream
 \end{minted}
 \end{listing}
 
-This doesn't appear to be a good idea at all thus far, we are wasting a lot of work converting between streams and lists. However, there is a rather obvious
+Thus far, this doesn't appear to be a good idea at all: we are wasting a lot of work converting between streams and lists. However, there is a rather obvious
 avenue for elimination given the equivalence \mono{stream . unstream = id}:
 
 \begin{listing}[H]
@@ -543,7 +543,7 @@ halves xs = Data.Stream.unstream
 \end{listing}
 
 Simplified indeed, the specialised functions have been adopted and sometimes inlined.
-However, any signs of fusion can not yet be found. Let's wind the clock forward another
+However, any signs of fusion can not yet be found. Let us wind the clock forward another
 transformation.
 
 \begin{listing}[H]
@@ -620,7 +620,7 @@ halves xs =
 \end{minted}
 \end{listing}
 
-Now something quite drastic has changed and it is not clear what exactly has happened. Let's first investigate
+Now something quite drastic has changed and it is not clear what exactly has happened. Let us first investigate
 what the rewrite rule that just fired twice contributed to these changes. \mono{Class op {f}} implies that the 
 function \mono{f} as part of some class constraint was specialised. If we scour the source we find the following
 typeclass:
@@ -659,7 +659,7 @@ which is a requirement to ensure that other optimisations fire.
 
 But we have not seen any callsite for \mono{expose} in the code, so apparently it appeared somehow \textbf{and} was specialised 
 during this transformation. The most logical explanation for new function calls appearing is that they were the result of an inlining.
-Our suspects are on the four stream functions:
+Our likely perpetrator is one of the four stream functions:
 
 \begin{itemize}
 \item \mono{stream}
@@ -683,7 +683,7 @@ unstream (Stream next s0) = unfold_unstream s0
 \end{minted}
 \end{listing}
 
-Our expectations are further confirmed by the inline pragma which says to inline only at phase 0, which exactly what we think happened.
+Our expectations are further confirmed by the inline pragma which says to inline only at phase 0, which is exactly what we think happened.
 The same inline pragma is present on all of our other suspects as well, so we are looking a quadruple inlining event. The calls to \mono{seq}
 are desugared as case expressions, as they are the primitive operation in Core that evaluates to WHNF.
 
@@ -726,7 +726,7 @@ as the composition of \mono{next} function of \mono{map} and \mono{filter}. This
 
 But we are still left with some noise, notably the wrapping/unwrapping of values in now redundant \mono{L} constructors. That description should invoke
 a sense of familiarity, as the reader should know by know that an upcoming transformation is that of the \textit{worker/wrapper}!
-If follow the rest of the pipeline in chronological order:
+If we follow the rest of the pipeline in chronological order:
 
 \begin{listing}[H]
 \begin{minted}[linenos, fontsize=\footnotesize]{haskell}
@@ -805,7 +805,7 @@ halves xs =
 \end{listing}
 
 With that final elision we have obtained a fully fused version of our \mono{map}/\mono{filter} composition with any auxiliary machinery like \mono{stream} and
-\mono{unstream} being fused away. 
+\mono{unstream} being simplified away. 
 
 So what we have shown is that it is perfectly feasible to create and retrofit an alternative fusion system in vanilla Haskell. 
 However, it is also clear that the process of implementating it goes beyond translating the theory verbatim. Namely, we have seen how \mono{Unlifted} class was necessary to ensure that
@@ -857,7 +857,7 @@ unlines ls = go1 ls
 \end{listing}
 
 This definition is problematic because every line is traversed once to append a newline character and then again to append it to the rest of the line
-yielding an $O(n^2)$ runtime, while we already know that an $O(n)$ runtime is possible. To rule out any other factors we ran a benchmark on both
+yielding an $O(2n)$ runtime, while we already know that an $O(n)$ runtime is possible. To rule out any other factors we ran a benchmark on both
 \mono{unlines} and \mono{Prelude.unlines} on the first 73 lines of lorem ipsum, confirming our suspicions.
 
 \begin{listing}[H]
@@ -885,7 +885,7 @@ expression as our version of \mono{unlines} should reasonably be expected to fus
 
 Our approach to investigating this issue is to scroll all the way back to the desugared stage and see if we can find a distinct reason why the program was not transformed 
 to something more optimal. Given that the culprit is a secondary list traversal, it is safe to assume that it is indeed the fusion system, or at least an iteraction with it,
-that is at the root of this problem. Therefore, we decide to analyze the problem by seeking meaningful differences between the results of the transformation and the steps
+that is at the root of this problem. Therefore, we decided to analyze the problem by seeking meaningful differences between the results of the transformation and the steps
 given in the paper. The tool reports that the following Core is desugared from the source:
 
 \begin{listing}[H]
@@ -973,7 +973,7 @@ unlines ls = foldr
 \end{minted}
 \end{listing}
 
-The only way can again find fusible pairs now is if we inline mapFB. We can easily find its definition by
+The only way to again find fusible pairs now is if by inlining mapFB. We can easily find its definition by
 right-clicking the term and selecting the \textit{Query on Hoogle} option. From there we can quickly get the
 source code:
 
@@ -1085,9 +1085,9 @@ allocation-free. Also see Trac #13001.
 \end{minted}
 \end{listing}
 
-Here we find a plausible answer to why \mono{mapFB} exists: ``\textit{alls to FB functions can be written back to the original form
-when no fusion happens}''. It is desirable to retain the structure of the original map if it is not fused away (we will go more in depth in \cref{section:results:unlines:conclusion}).
-\mono{mapFB} enables does just that,
+Here we find a plausible answer to why \mono{mapFB} exists: ``\textit{calls to FB functions can be written back to the original form
+when no fusion happens}''. It is desirable to retain the structure of the original map if it is not fused away (we will go more in depth as to why in \cref{section:results:unlines:conclusion}).
+\mono{mapFB} enables just that,
 it exposes an initial opportunity to fuse but is reversible using the \textit{mapList} rule if no fusion happens. This rule also gives us a lot of
 intuition how \mono{mapFB} operates. Namely, given the cons function and an empty generator is equivalent to canonical \mono{map}. 
 Similarly, the rule \textit{map} gives us information about how \mono{map} is more generally related to \mono{mapFB}. At this point we should
@@ -1232,7 +1232,8 @@ code. To repeat:
 
 \begin{listing}[H]
 \begin{minted}[]{text}
-...ensures that calls to FB functions can be written back to the original form when no fusion happens.
+...ensures that calls to FB functions can be written
+ back to the original form when no fusion happens.
 \end{minted}
 \end{listing}
 
@@ -1240,7 +1241,7 @@ code. To repeat:
 or if a \mono{mapFB} is left over after the \textit{mapFB} rules has combined consecutive instances, we can reconstruct the original
 call to \mono{map}. This has two important befinits: First of all, it allows a more recognizable form of compiled Core that more closely
 resembles the original source code. Secondly and arguably more importantly, we save on code size by reusing the map function by not
-rewriting each list operation to a local, recursive \mono{go}.
+rewriting each list operation to a local, recursive \mono{go} function.
 
 Let us find a concrete example by comparing our patched version of GHC with the original one when compiling the very simple function:
 
@@ -1395,8 +1396,9 @@ That said, this information is still available upon request by double-clicking o
 \end{figure}
 
 This means that our tool is does not necessarily compromise on available information, but merely utilizes an interactive environment
-to present the information less crudely. Clearly we were able to retrieve all the information needed from GHC, but our experience was
-somewhat painful. By writing GHC's output to a file we could use features of most text editors like a string search to scroll through
+to present the information less crudely. Clearly we were able to retrieve all the information needed from GHC without our tool, 
+but the experience was somewhat painful.
+By writing GHC's output to a file we could use features of most text editors like a string search to scroll through
 the output of each pass. However, because of auxiliary definitions in the Core, the name of the current pass was usually not visible on
 screen without having to scroll up. More importantly, which rewrite rules fired was also tough to attribute to a specific pass without
 having to double-check regularly. In short, interpreting the textual output was more laborious and error prone that our newly developed

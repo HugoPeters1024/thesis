@@ -3,8 +3,8 @@
 \section{GHC, an optimising compiler}
 
 Haskell is a high level language designed to write highly composable functions.
-This seemingly encourages programmers to write code that
-is not necessarily fast to evaluate. An extremely common example is the composition
+This naturally encourages programmers to write code that
+is not particularly fast to evaluate. An extremely common example is the composition
 of list operations. Consider the function \mono{halves} which divides each element
 in a list of \mono{Int}s in halve, discarding those that are not a multiple of 2.
 
@@ -17,7 +17,7 @@ halves = map (`div` 2) . filter even
 
 Both \mono{map} and \mono{filter} are defined as a loop over an input list, producing a new list as output. 
 If code was generated for \mono{halves} in its current form, it would produce two loops as well as allocate
-an intermediate list. This is unnecessary extra work and allocation behavior because
+an intermediate list. This is unnecessary extra work and incurs more allocation costs because
 it would be possible to rewrite the function to circumvent this issue:
 
 
@@ -34,9 +34,9 @@ halves_fast (x:xs) =
 \end{minted}
 \end{listing}
 
-But requiring the programmer to do such rewrites manually tragically undermines
-the benefits of this compositional style of programming. Code simply would be harder to read, write,
-maintain, and consequently tend to be less correct. 
+However, requiring the programmer to do such rewrites manually tragically undermines
+the benefits of this compositional style of programming. Code simply would be harder to read, write and
+maintain and likely to be less correct as a result. 
 
 Luckily, GHC does address this issue - and many others - with an extensive set of optimisation transformations.
 This particular program will benefit greatly from the fusion system which specifically deals with removing
@@ -50,7 +50,7 @@ can we diagnose the root of the problem and explain what went wrong?
 
 \section{The cascade effect}
 
-Optimisation transformations are applied is a certain order, giving rise to the \textit{cascade effect} \cite{haskell_optimisations_1997}.
+Optimisation transformations are applied in a certain order, giving rise to the \textit{cascade effect} \cite{haskell_optimisations_1997}.
 This effect refers to the dramatic consequences that the order of transformations can have. We will study an example that
 showcases a problematic tug-of-war between two optimisations: (1) inlining and (2) rewrite rules.
 
@@ -64,10 +64,10 @@ These transformations are fairly simply defined as:
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
 -- inlining, knowing that x = x' from some binding site
-e             -inline->   e[x := x']
+e                 -inline->      e[x := x']
 
 -- beta reduction:
-(\x -> e) a   -ß->        e[x := a]
+(\x -> e) a       -ß->           e[x := a]
 \end{minted}
 \end{listing}
 
@@ -111,20 +111,21 @@ bottom = True
 \end{minted}
 \end{listing}
 
-We can now see that thanks to this transformation duo, we have reduced an expression to a constant
-expression, eliminating any runtime cost. Because the inlining transformation so commonly goes hand
-in hand with \textbeta-reduction we will --- for brevity's sake --- from now on presume that \textbeta-reduction,
+Thanks to this transformation duo, we have reduced an expression to a mere literal, 
+eliminating any runtime cost. Because the inlining transformation so commonly goes hand
+in hand with \textbeta-reduction we will -- for brevity's sake -- from now on presume that \textbeta-reduction,
 wherever relevant, is also applied when we say that an inlining transformation has taken place.
 
 In a sense we were lucky here that the body of the \mono{not} function reduced so completely. But in reality
-it can be the case that function definitions are quite large. While inlining could then still be a good idea (as it eliminates jumps),
-it does come at the cost of larger code sizes. GHC uses quite a few crude heuristics to help with weighing this trade-off \cite{haskell_optimisations_1997}.
+it can be the case that function definitions are quite large. Inlining will then still eliminate the need for a function call,
+but it does come at the cost of larger code sizes through code duplication.
+GHC uses quite a few crude heuristics to help with weighing this trade-off \cite{haskell_optimisations_1997}.
 Interestingly, these heuristics have not undergone much reconsideration until quite recently \cite{inling_magic_numbers}. 
 Suffice to say that it is not trivial to predict whether a function will be inlined and the performance implications thereof.
 
 \subsubsection{Laziness and thunks}
 Being a lazy language, Haskell can profit from inlining in a secondary way as well. A well-established
-language feature is the let expression, a syntactically nice way bind extra definitions. Consider a function
+language feature is the let expression, a syntactically nice way to bind extra definitions. Consider a function
 that decrypts the password of a user but only if it is the admin.
 
 \begin{listing}[H]
@@ -140,7 +141,7 @@ getAdminPassword user =
 \end{minted}
 \end{listing}
 
-Obviously the \mono{decryptSHA1} is going to be an extremely cost heavy function that under no
+Obviously the \mono{decryptSHA1} is going to be an extremely costly function that under no
 circumstances we wish to be evaluated unless absolutely necessary. Luckily, because Haskell is a
 lazy language the let assignment does not actually evaluate anything; it only allocates a so-called
 \textit{thunk}. Such a thunk represents an expression that is yet to be evaluated. Evaluation is
@@ -151,7 +152,7 @@ at avoiding unnecessary work.
 Yet it can still be improved upon. While the let expression might not do any extra work it does require
 this thunk allocation, which is not free. But because our let bound variable \mono{decrypted} 
 is used exactly once, we can inline it at the only call-site without running the risk of duplicating 
-the expensive operation. This yields the more performant definition:
+the expensive operation. This yields the ever so slightly more performant definition:
 
 \begin{listing}[H]
 \begin{minted}[linenos]{haskell}
@@ -167,7 +168,7 @@ getAdminPassword user = case (username user) of
 
 We've seen how generic program transformation may improve performance. However, GHC can only use relatively
 shallow reasoning as to not jeopardize the correctness of transformations or explode compile times. 
-The programmer on the other hand may have much more in-depth knowledge about the domain of the program 
+The programmer on the other hand, may have much more in-depth knowledge about the domain of the program 
 and its intended behavior. \cite{playing_by_the_rules}.
 Programmers can leverage this knowledge by defining so-called \textit{rewrite rules}. They inform the compiler of
 substitutions that are not obvious or strictly speaking even correct.  
@@ -214,6 +215,20 @@ instance Functor Tree where
   fmap = mapTree
 \end{minted}
 
+Applying this same reasoning to the rewrite rule, one might feel enticed to write:
+
+\begin{listing}[H]
+\begin{minted}[linenos]{haskell}
+{-# Rules
+   "fmap/fmap"   forall f g.   fmap f . fmap g    = fmap (f. g)   ;
+#-}
+\end{minted}
+\end{listing}
+
+This is not entirely controversial as the soundness of this rule is verifiable under the Functor laws. However,
+GHC has decided against enforcing these laws nor performing transformations that require these laws to hold.
+This means that defining custom rules per datatype is required to yield maximum performance. Similar situations
+arise with the \mono{Applicative} and \mono{Monad} typeclasses.
 
 
 \subsection{Tug-of-war}
@@ -227,7 +242,7 @@ is rendered non-active. The final optimised function has regrettably converged t
 
 \begin{minted}[linenos]{haskell}
 addFive :: Tree Int -> Tree Int
-addFive = \x -> mapTree (+1) (mapTree (+4) x)
+addFive = \tree -> mapTree (+1) (mapTree (+4) tree)
 \end{minted}
 
 The important point is here is not that rewrite rules are inherently flawed (after all, we could easily
@@ -245,7 +260,7 @@ effort to be made more efficient.
 
 So if we want our programs to not only be correct but also terminate in reasonable amount of time while
 not consuming an overly large chunk of resources, we have to identify an extra set of contraints. 
-These constraints do not deal with the functionality of the program but rather it's compiled form.
+These constraints do not deal with the functionality of the program but rather its compiled form.
 This collection of additional constraints are examples of \textit{Non-functional} requirements. 
 
 To illustrate with a real world example, the very popular \mono{text} library makes the following promise:
@@ -309,11 +324,11 @@ over 100 lines to painfully sift through without little more ergonomics than a s
 It would be possible to get the output at various intermediate moments to gauge where the 
 offending \mono{Text} should have been erased, resulting in an extra compilation artifact per transformation.
 Usually this means you have to analyze around 20 different versions of the code. 
-This is a tedious and error-prone process, not to mention requires a relatively highly skilled programmer 
-with a solid understanding of the GHC and its optimiser. 
+This is a tedious and error-prone process, not to mention requires relatively highly skilled programmers
+with an in-depth understanding of the GHC and its optimiser. 
 
 Moreover, we risk having to repeat this work in the future when any small number of changes
-could --- through the cascade effect --- trigger this test as failing again.
+could, through the cascade effect, trigger this test as failing again.
 
 \section{Introducing \mono{HsComprehension}}
 
@@ -327,14 +342,14 @@ of less experienced programmers.
 This belief stems first from the results of the yearly
 Haskell survey where in 2021 only 16\% of respondents either agreed or strongly agreed with the
 statement `\textit{I can easily reason about the performance of my Haskell programs}' \cite{haskell_survey_2021}.
-We are not the only one seeing this statistic as a call to action. As recently the current year,
-Young announced work on a complete Haskell optimisation handbook \cite{optimisation_handbook}.
+We are not the only one seeing this statistic as a call to action. As recently as the current year,
+Young. J. announced work on a complete Haskell optimisation handbook \cite{optimisation_handbook}.
 A preliminary version of the book already shows that a section on analysing optimisation transformations
-is planned. Although, it is our opinion that a guiding resource --- while certainly extremely helpful ---
+is planned. Although, it is our opinion that a guiding resource -- while certainly extremely helpful --
 is not a substitute for better tooling.
 
-Secondly, through conversations with Haskell programmers at Well-Typed --- who are also major contributors
-and maintainers of GHC itself --- we learned that it was common practice to create personal tools that
+Secondly, through conversations with Haskell programmers at Well-Typed -- who are also major contributors
+and maintainers of GHC itself -- we learned that it was common practice to create personal tools that
 assisted them in analysing intermediate results of the optimisation transformations during the fairly
 frequent task of trying to make performance critical sections of programs more efficient. 
 This proves that there is a demand for such tools and that a unified solution does not yet exist.
